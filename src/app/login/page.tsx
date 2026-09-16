@@ -1,24 +1,52 @@
-import { sendMagicLink } from "./actions";
+import Image from "next/image";
 import { BrandLogo } from "@/components/brand-logo";
+import { sendMagicLink } from "./actions";
 
 type LoginPageProps = { searchParams: Promise<{ sent?: string; error?: string }> };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-6 py-12 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl dark:border-white/10 dark:bg-white/5">
-        <BrandLogo className="mb-5 h-auto w-64" priority />
-        <h1 className="text-3xl font-semibold">Entrar no painel</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">Acesse sua loja com um link seguro enviado para o seu e-mail. Não usamos senhas.</p>
-        {params.sent ? <p className="mt-6 rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-300">Confira seu e-mail para continuar.</p> : null}
-        {params.error ? <p className="mt-6 rounded-lg bg-red-400/10 p-3 text-sm text-red-300">{params.error}</p> : null}
-        <form action={sendMagicLink} className="mt-8 space-y-4">
-          <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-200">E-mail</label>
-          <input id="email" name="email" type="email" required autoComplete="email" placeholder="tu@negocio.com" className="h-12 w-full rounded-lg border border-slate-300 bg-white px-4 outline-none ring-emerald-400 transition focus:ring-2 dark:border-white/15 dark:bg-slate-900" />
-          <button type="submit" className="h-12 w-full rounded-lg bg-emerald-400 font-semibold text-slate-950 transition hover:bg-emerald-300">Enviar link de acesso</button>
-        </form>
-      </section>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-5 py-10 text-slate-950 sm:px-8">
+      <Image src="/login-background.jpg" alt="" fill priority sizes="100vw" className="object-cover object-center" />
+      <div className="absolute inset-0 bg-slate-950/35 dark:bg-slate-950/65" />
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-950/55 via-transparent to-emerald-950/45" />
+
+      <div className="relative z-10 grid w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/30 bg-white/15 shadow-2xl shadow-slate-950/30 backdrop-blur-md lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="hidden min-h-[620px] flex-col justify-between p-10 text-white lg:flex xl:p-14">
+          <div>
+            <BrandLogo className="h-auto w-72 drop-shadow-2xl" priority />
+            <div className="mt-16 max-w-lg">
+              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-200">Ventas inteligentes en WhatsApp</p>
+              <h1 className="mt-5 text-5xl font-semibold leading-[1.08] tracking-tight">Tu negocio cobra. PagoFácil hace el resto.</h1>
+              <p className="mt-6 max-w-md text-lg leading-8 text-white/80">Gestiona tu tienda, recibe pagos en dólares, bolívares y USDT, y mantén cada venta bajo control.</p>
+            </div>
+          </div>
+          <p className="text-sm text-white/65">Una experiencia simple para comerciantes venezolanos.</p>
+        </section>
+
+        <section className="flex min-h-[620px] items-center bg-white/90 p-7 dark:bg-slate-950/88 sm:p-10">
+          <div className="mx-auto w-full max-w-md">
+            <div className="mb-8 lg:hidden"><BrandLogo className="h-auto w-56" priority /></div>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-400">Acceso seguro</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Bienvenido de nuevo</h2>
+            <p className="mt-3 leading-7 text-slate-600 dark:text-slate-300">Entra a tu panel con un enlace mágico. Sin contraseñas y sin complicaciones.</p>
+
+            {params.sent ? <p className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">Listo. Revisa tu correo y abre el enlace para entrar a tu cuenta.</p> : null}
+            {params.error ? <p className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700 dark:border-red-400/20 dark:bg-red-400/10 dark:text-red-200">{params.error}</p> : null}
+
+            <form action={sendMagicLink} className="mt-8 space-y-5">
+              <div>
+                <label htmlFor="email" className="text-sm font-semibold text-slate-800 dark:text-slate-200">Correo electrónico</label>
+                <input id="email" name="email" type="email" required autoComplete="email" placeholder="tu@negocio.com" className="mt-2 h-13 w-full rounded-xl border border-slate-200 bg-white px-4 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-white/15 dark:bg-white/10 dark:text-white" />
+              </div>
+              <button type="submit" className="h-13 w-full rounded-xl bg-slate-950 px-5 font-semibold text-white shadow-lg shadow-slate-950/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-500/25 dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300">Enviar enlace de acceso</button>
+            </form>
+            <p className="mt-7 text-center text-xs leading-5 text-slate-500 dark:text-slate-400">Al continuar, recibirás un enlace único y seguro en tu correo.</p>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
