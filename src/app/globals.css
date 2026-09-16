@@ -128,3 +128,13 @@
     @apply font-sans;
   }
 }
+
+/* Ajustes de superfícies que usam utilitários fixos nas telas do MVP. */
+.dark .bg-white { background-color: oklch(0.205 0 0); }
+.dark .bg-slate-50 { background-color: oklch(0.16 0.02 260); }
+.dark .bg-slate-100 { background-color: oklch(0.22 0.02 260); }
+.dark .text-slate-950 { color: oklch(0.985 0 0); }
+.dark .text-slate-700, .dark .text-slate-600 { color: oklch(0.78 0.02 260); }
+.dark .text-slate-500 { color: oklch(0.68 0.02 260); }
+.dark .border-slate-200, .dark .border-slate-300 { border-color: oklch(1 0 0 / 15%); }
+.dark input, .dark textarea, .dark select { border-color: oklch(1 0 0 / 15%); background-color: oklch(0.16 0.02 260); color: oklch(0.985 0 0); }
