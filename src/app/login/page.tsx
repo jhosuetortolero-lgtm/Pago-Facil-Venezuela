@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { BrandLogo } from "@/components/brand-logo";
+import { ActionButton } from "@/components/action-button";
 import { sendMagicLink } from "./actions";
 
 type LoginPageProps = { searchParams: Promise<{ sent?: string; error?: string }> };
@@ -41,7 +42,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 <label htmlFor="email" className="text-sm font-semibold text-slate-800 dark:text-slate-200">Correo electrónico</label>
                 <input id="email" name="email" type="email" required autoComplete="email" placeholder="tu@negocio.com" className="mt-2 h-13 w-full rounded-xl border border-slate-200 bg-white px-4 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 dark:border-white/15 dark:bg-white/10 dark:text-white" />
               </div>
-              <button type="submit" className="h-13 w-full rounded-xl bg-slate-950 px-5 font-semibold text-white shadow-lg shadow-slate-950/20 transition hover:-translate-y-0.5 hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-500/25 dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300">Enviar enlace de acceso</button>
+              <ActionButton>Enviar enlace de acceso</ActionButton>
             </form>
             <p className="mt-7 text-center text-xs leading-5 text-slate-500 dark:text-slate-400">Al continuar, recibirás un enlace único y seguro en tu correo.</p>
           </div>
