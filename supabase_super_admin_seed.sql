@@ -1,6 +1,6 @@
 -- Substitua pelo e-mail real antes de executar no SQL Editor do Supabase.
 do $$
-declare target_email text := 'SEU_EMAIL_DE_SUPER_ADMIN@example.com';
+declare target_email text := 'jhosuetortolero@adm.com';
 declare target_id uuid;
 begin
   select id into target_id from auth.users where email = target_email;
