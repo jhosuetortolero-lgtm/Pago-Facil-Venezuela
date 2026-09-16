@@ -24,5 +24,5 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (ready) window.localStorage.setItem("pagofacil-theme", theme);
   }, [theme, ready]);
 
-  return <>{children}<button type="button" aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"} aria-pressed={theme === "dark"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")} className="fixed right-5 top-5 z-[60] flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-700 shadow-lg backdrop-blur transition hover:scale-105 dark:border-white/15 dark:bg-slate-900/90 dark:text-yellow-300">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button></>;
+  return <>{children}<button type="button" aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"} aria-pressed={theme === "dark"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")} className="pf-theme-toggle fixed right-5 top-5 z-[60] flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-700 shadow-lg backdrop-blur transition hover:scale-105 dark:border-white/15 dark:bg-slate-900/90 dark:text-yellow-300">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button></>;
 }

@@ -12,7 +12,7 @@ export default function Home() {
         <BrandLogo className="h-auto w-80" priority />
         <h1 className="mt-5 max-w-2xl text-4xl font-semibold tracking-tight sm:text-6xl">Cobrar en Venezuela, sin complicaciones.</h1>
         <p className="mt-6 max-w-xl text-lg text-slate-600 dark:text-slate-300">La plataforma B2B2C para gestionar tu tienda y recibir pagos de tus clientes.</p>
-        <Link href="/login" className="mt-10 rounded-xl bg-emerald-500 px-7 py-3.5 font-semibold text-slate-950 shadow-lg shadow-emerald-900/10 transition hover:-translate-y-0.5 hover:bg-emerald-400">Entrar al panel</Link>
+        <Link href="/login" className="pf-interactive mt-10 rounded-xl bg-emerald-500 px-7 py-3.5 font-semibold text-slate-950 shadow-lg shadow-emerald-900/10 transition hover:-translate-y-0.5 hover:bg-emerald-400">Entrar al panel</Link>
       </section>
     </main>
   );
