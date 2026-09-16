@@ -10,8 +10,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-5 py-10 text-slate-950 sm:px-8">
       <Image src="/login-background.jpg" alt="" fill priority sizes="100vw" className="object-cover object-center" />
-      <div className="absolute inset-0 bg-slate-950/35 dark:bg-slate-950/65" />
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-950/55 via-transparent to-emerald-950/45" />
+      <div className="absolute inset-0 bg-slate-950/45 dark:bg-slate-950/75" />
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-950/65 via-transparent to-emerald-950/55" />
 
       <div className="relative z-10 grid w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/30 bg-white/15 shadow-2xl shadow-slate-950/30 backdrop-blur-md lg:grid-cols-[1.05fr_0.95fr]">
         <section className="hidden min-h-[620px] flex-col justify-between p-10 text-white lg:flex xl:p-14">
