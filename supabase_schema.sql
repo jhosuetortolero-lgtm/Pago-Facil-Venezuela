@@ -20,6 +20,7 @@ create table public.stores (
   pago_movil_bank text,
   pago_movil_id text,
   binance_pay_id text,
+  onboarding_status text not null default 'active' check (onboarding_status in ('pending', 'active')),
   exchange_rate_mode text not null default 'automatic' check (exchange_rate_mode in ('automatic', 'manual')),
   manual_exchange_rate numeric(12, 4) check (manual_exchange_rate is null or manual_exchange_rate > 0),
   current_exchange_rate numeric(12, 4) check (current_exchange_rate is null or current_exchange_rate > 0),
@@ -33,7 +34,9 @@ create table public.products (
   store_id uuid not null references public.stores(id) on delete cascade,
   name text not null check (char_length(trim(name)) between 1 and 160),
   description text,
+  image_url text,
   price_usd numeric(12, 2) not null check (price_usd > 0),
+  stock integer not null default 0 check (stock >= 0),
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

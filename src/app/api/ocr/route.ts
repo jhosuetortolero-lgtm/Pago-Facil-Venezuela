@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const fileValue = form.get("proof");
   let productIds: unknown = [];
   try { productIds = JSON.parse(String(form.get("product_ids") ?? "[]")); } catch { productIds = null; }
-  const parsed = checkoutSchema.safeParse({ storeSlug: form.get("store_slug"), paymentMethod: form.get("payment_method"), totalUsd: form.get("total_usd"), productIds });
+  const parsed = checkoutSchema.safeParse({ storeSlug: form.get("store_slug"), customerName: form.get("customer_name"), customerPhone: form.get("customer_phone"), paymentMethod: form.get("payment_method"), totalUsd: form.get("total_usd"), productIds });
   if (!parsed.success || !(fileValue instanceof File) || fileValue.size === 0 || fileValue.size > MAX_FILE_SIZE || !allowedTypes.has(fileValue.type)) return NextResponse.json({ error: "Comprobante inválido. Usa una imagen JPG o PNG de hasta 5 MB." }, { status: 400 });
 
   const admin = createAdminClient();
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
   const calculatedTotal = products.reduce((sum, product) => sum + Number(product.price_usd), 0);
   if (Math.abs(calculatedTotal - parsed.data.totalUsd) > 0.01) return NextResponse.json({ error: "El total del carrito cambió. Actualiza e intenta nuevamente." }, { status: 409 });
 
-  const { data: order, error: orderError } = await admin.from("orders").insert({ store_id: store.id, total_usd: calculatedTotal, payment_method: parsed.data.paymentMethod, status: "pending" }).select("id").single();
+  const { data: order, error: orderError } = await admin.from("orders").insert({ store_id: store.id, customer_name: parsed.data.customerName || null, customer_phone: parsed.data.customerPhone, total_usd: calculatedTotal, payment_method: parsed.data.paymentMethod, status: "pending" }).select("id").single();
   if (orderError || !order) return NextResponse.json({ error: "No se pudo crear el pedido." }, { status: 500 });
   const proofPath = `${store.id}/${order.id}.${fileValue.type === "image/png" ? "png" : "jpg"}`;
   const upload = await admin.storage.from("payment-proofs").upload(proofPath, fileValue, { contentType: fileValue.type, upsert: false });

@@ -20,6 +20,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
+    document.body.classList.toggle("dark", theme === "dark");
     document.documentElement.style.colorScheme = theme;
     if (ready) window.localStorage.setItem("pagofacil-theme", theme);
   }, [theme, ready]);

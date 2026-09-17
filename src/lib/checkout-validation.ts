@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const checkoutSchema = z.object({
   storeSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  customerName: z.string().trim().max(120).optional().or(z.literal("")),
+  customerPhone: z.string().trim().min(7).max(20),
   paymentMethod: z.enum(["zelle", "pago_movil", "binance_pay"]),
   totalUsd: z.coerce.number().positive().finite(),
   productIds: z.array(z.string().uuid()).min(1).max(100),
