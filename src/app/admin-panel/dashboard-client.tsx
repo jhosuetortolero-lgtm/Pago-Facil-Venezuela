@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import type { ComponentType } from "react";
 import {
   Activity,
@@ -35,6 +36,8 @@ import {
   X,
 } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
+import { ExchangeRateWidget } from "@/components/exchange-rate-widget";
+import type { ExchangeRateSnapshot } from "@/lib/exchange-rate";
 
 type Language = "ES" | "EN";
 type StoreStatus = "active" | "suspended" | "pending";
@@ -48,6 +51,15 @@ type StoreRow = {
   status: StoreStatus;
   plan?: PlanName;
   price?: number | null;
+  currentPeriodEnd?: string | null;
+};
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  last: string;
+  status: string;
 };
 type ServerAction = (formData: FormData) => void | Promise<void>;
 type Props = {
@@ -62,7 +74,11 @@ type Props = {
   error?: string;
   onToggleStatus: ServerAction;
   onCreateStore: ServerAction;
+  onRenewSubscription: ServerAction;
+  onInviteUser: ServerAction;
+  users: UserRow[];
   onSignOut: ServerAction;
+  exchangeRates: ExchangeRateSnapshot;
 };
 
 const navItems = [
@@ -284,6 +300,7 @@ type DemoStore = {
   plan: PlanName;
   price?: number | null;
   status: "active" | "pending" | "inactive";
+  currentPeriodEnd?: string | null;
 };
 type DemoSale = {
   id: string;
@@ -414,6 +431,7 @@ const demoUsers = [
     status: "pending",
   },
 ];
+void demoUsers;
 
 function DemoBadge({
   children,
@@ -484,14 +502,23 @@ function LegacyStoresView({ language, sourceStores }: { language: Language; sour
 }
 
 */
+function subscriptionRemaining(end: string | null | undefined, es: boolean) {
+  if (!end) return { label: es ? "Sin fecha" : "No date", tone: "slate" as const };
+  const days = Math.ceil((new Date(end).getTime() - Date.now()) / 86400000);
+  if (Number.isNaN(days)) return { label: es ? "Sin fecha" : "No date", tone: "slate" as const };
+  if (days <= 0) return { label: es ? "Vencido" : "Expired", tone: "red" as const };
+  return { label: es ? `Quedan ${days} días` : `${days} days left`, tone: days <= 5 ? "red" as const : days <= 15 ? "amber" as const : "green" as const };
+}
 function StoresView({
   language,
   sourceStores,
   onCreateStore,
+  onRenewSubscription,
 }: {
   language: Language;
   sourceStores: StoreRow[];
   onCreateStore: ServerAction;
+  onRenewSubscription: ServerAction;
 }) {
   const es = language === "ES";
   const [query, setQuery] = useState("");
@@ -504,13 +531,14 @@ function StoresView({
   );
   const rows: DemoStore[] = sourceStores.length
     ? sourceStores.map((item) => ({
-        id: item.id.slice(0, 8).toUpperCase(),
+        id: item.id,
         name: item.name,
         owner: item.email.split("@")[0],
         email: item.email,
         plan: item.plan ?? "Growth",
         price: item.price,
         status: item.status === "suspended" ? "inactive" : item.status,
+        currentPeriodEnd: item.currentPeriodEnd,
       }))
     : demoStores;
   const visible = rows.filter(
@@ -603,6 +631,7 @@ function StoresView({
                 <th className="px-5 py-4">{es ? "Nombre" : "Name"}</th>
                 <th className="px-5 py-4">{es ? "Propietario" : "Owner"}</th>
                 <th className="px-5 py-4">Plan</th>
+                <th className="px-5 py-4">Suscripción</th>
                 <th className="px-5 py-4">{es ? "Estado" : "Status"}</th>
                 <th className="px-5 py-4 text-right">
                   {es ? "Acciones" : "Actions"}
@@ -615,7 +644,7 @@ function StoresView({
                 return (
                   <tr key={row.id} className="hover:bg-slate-50">
                     <td className="px-5 py-4 font-mono text-xs text-slate-500">
-                      {row.id}
+                      {row.id.slice(0, 8).toUpperCase()}
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
@@ -649,6 +678,12 @@ function StoresView({
                       <span className="mt-1 text-xs font-medium text-slate-500">
                         {formatPlanPrice(row)}
                       </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      {(() => {
+                        const subscription = subscriptionRemaining(row.currentPeriodEnd, es);
+                        return <div><DemoBadge tone={subscription.tone}>{subscription.label}</DemoBadge>{row.currentPeriodEnd ? <p className="mt-1 text-[11px] text-slate-400">{new Date(row.currentPeriodEnd).toLocaleDateString(es ? "es-VE" : "en-US")}</p> : null}</div>;
+                      })()}
                     </td>
                     <td className="px-5 py-4">
                       <DemoBadge
@@ -696,6 +731,14 @@ function StoresView({
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        {sourceStores.some((store) => store.id === row.id) ? (
+                          <form action={onRenewSubscription}>
+                            <input type="hidden" name="store_id" value={row.id} />
+                            <button type="submit" className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
+                              Renovar (+30 días)
+                            </button>
+                          </form>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -892,13 +935,26 @@ function SalesViewPrimary({ language }: { language: Language }) {
   );
 }
 
-function UsersViewPrimary({ language }: { language: Language }) {
+function InviteSubmitButton({ language }: { language: Language }) {
+  const { pending } = useFormStatus();
+  return <button type="submit" disabled={pending} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"><Mail className="h-4 w-4" />{pending ? (language === "ES" ? "Enviando..." : "Sending...") : (language === "ES" ? "Enviar invitación" : "Send invitation")}</button>;
+}
+
+function UsersViewPrimary({ language, sourceUsers, onInviteUser }: { language: Language; sourceUsers: UserRow[]; onInviteUser: ServerAction }) {
   const es = language === "ES";
   const [inviteOpen, setInviteOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const rows = demoUsers.filter((user) =>
+  const [openUserMenu, setOpenUserMenu] = useState<string | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+  const rows = sourceUsers.filter((user) =>
     (user.name + user.email).toLowerCase().includes(query.toLowerCase()),
   );
+  async function copyEmail(email: string) {
+    if (navigator.clipboard) await navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    setOpenUserMenu(null);
+    window.setTimeout(() => setCopiedEmail(null), 1800);
+  }
   return (
     <SectionFrame
       language={language}
@@ -950,7 +1006,7 @@ function UsersViewPrimary({ language }: { language: Language }) {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((user) => (
-                <tr key={user.email} className="hover:bg-slate-50">
+                <tr key={user.id} className="hover:bg-slate-50">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">
@@ -983,13 +1039,33 @@ function UsersViewPrimary({ language }: { language: Language }) {
                           : "Pending"}
                     </DemoBadge>
                   </td>
-                  <td className="px-5 py-4 text-right">
-                    <button
-                      type="button"
-                      className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-100"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
+                  <td className="relative px-5 py-4 text-right">
+                    <div className="relative inline-block text-left">
+                      <button
+                        type="button"
+                        aria-label={es ? "Abrir acciones del usuario" : "Open user actions"}
+                        aria-expanded={openUserMenu === user.id}
+                        onClick={() => setOpenUserMenu((current) => current === user.id ? null : user.id)}
+                        className="rounded-lg border border-slate-200 p-2 text-slate-500 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                      {openUserMenu === user.id ? (
+                        <div className="absolute right-0 top-11 z-20 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 text-left shadow-xl shadow-slate-900/10">
+                          <button type="button" onClick={() => copyEmail(user.email)} className="flex w-full items-center rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700">
+                            {copiedEmail === user.email ? (es ? "¡Correo copiado!" : "Email copied!") : (es ? "Copiar correo" : "Copy email")}
+                          </button>
+                          {user.role !== "Super Admin" ? (
+                            <form action={onInviteUser} onSubmit={() => setOpenUserMenu(null)}>
+                              <input type="hidden" name="email" value={user.email} />
+                              <button type="submit" className="flex w-full items-center rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700">
+                                {es ? "Reenviar invitación" : "Resend invitation"}
+                              </button>
+                            </form>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1017,11 +1093,10 @@ function UsersViewPrimary({ language }: { language: Language }) {
                 ? "Enviaremos un enlace de acceso al correo indicado."
                 : "We will send an access link to the provided email."}
             </p>
-            <input
-              type="email"
-              placeholder={es ? "correo@ejemplo.com" : "email@example.com"}
-              className="mt-5 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm"
-            />
+            <form action={onInviteUser} onSubmit={() => setInviteOpen(false)}>
+              <input required name="email" type="email" placeholder={es ? "correo@ejemplo.com" : "email@example.com"} className="mt-5 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm" />
+              <InviteSubmitButton language={language} />
+            </form>
             <button
               type="button"
               onClick={() => setInviteOpen(false)}
@@ -1211,11 +1286,17 @@ function AdminSectionView({
   language,
   stores,
   onCreateStore,
+  onRenewSubscription,
+  users,
+  onInviteUser,
 }: {
   section: string;
   language: Language;
   stores: StoreRow[];
   onCreateStore: ServerAction;
+  onRenewSubscription: ServerAction;
+  users: UserRow[];
+  onInviteUser: ServerAction;
 }) {
   if (section === "stores")
     return (
@@ -1223,10 +1304,11 @@ function AdminSectionView({
         language={language}
         sourceStores={stores}
         onCreateStore={onCreateStore}
+        onRenewSubscription={onRenewSubscription}
       />
     );
   if (section === "sales") return <SalesViewPrimary language={language} />;
-  if (section === "users") return <UsersViewPrimary language={language} />;
+  if (section === "users") return <UsersViewPrimary language={language} sourceUsers={users} onInviteUser={onInviteUser} />;
   if (section === "settings") return <SettingsView language={language} />;
   const supportMessage =
     language === "ES"
@@ -1815,11 +1897,15 @@ function NewStoreModal({
 export default function AdminDashboard({
   currentUser,
   stores,
+  users,
   metrics,
   error,
   onToggleStatus,
   onCreateStore,
+  onRenewSubscription,
+  onInviteUser,
   onSignOut,
+  exchangeRates,
 }: Props) {
   const [language, setLanguage] = useState<Language>("ES");
   const t = copy[language];
@@ -1877,6 +1963,9 @@ export default function AdminDashboard({
           language={language}
           stores={stores}
           onCreateStore={onCreateStore}
+          onRenewSubscription={onRenewSubscription}
+          users={users}
+          onInviteUser={onInviteUser}
         />
       </SectionShell>
     );
@@ -2191,6 +2280,7 @@ export default function AdminDashboard({
               {t.online}
             </div>
           </section>
+          <ExchangeRateWidget rates={exchangeRates} />
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label={t.registeredStores}

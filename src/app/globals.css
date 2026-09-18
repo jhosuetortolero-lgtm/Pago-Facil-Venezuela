@@ -6,7 +6,7 @@
 .pf-corporate-background {
   background-color: #f8fafc;
   background-image:
-    linear-gradient(135deg, rgb(248 250 252 / 0.93), rgb(236 253 245 / 0.88)),
+    linear-gradient(135deg, rgb(241 245 249 / 0.78), rgb(209 250 229 / 0.70)),
     url("/pagofacil-corporate-background.jpg");
   background-attachment: fixed;
   background-position: center;
@@ -20,6 +20,74 @@
   backdrop-filter: blur(16px);
 }
 
+.pf-card-3d {
+  position: relative;
+  isolation: isolate;
+  border-color: rgb(148 163 184 / 0.48);
+  box-shadow:
+    0 1px 1px rgb(15 23 42 / 0.04),
+    0 8px 18px rgb(15 23 42 / 0.07),
+    0 22px 42px rgb(15 23 42 / 0.07);
+  transform: translateY(0) perspective(1000px) translateZ(0);
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.pf-card-3d::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.72), transparent 42%);
+  content: "";
+  pointer-events: none;
+}
+
+.pf-card-3d:hover {
+  border-color: rgb(52 211 153 / 0.48);
+  box-shadow:
+    0 2px 2px rgb(15 23 42 / 0.04),
+    0 14px 26px rgb(15 23 42 / 0.10),
+    0 28px 52px rgb(16 185 129 / 0.10);
+  transform: translateY(-4px) perspective(1000px) translateZ(8px);
+}
+
+.pf-corporate-background .bg-white.rounded-xl,
+.pf-corporate-background .bg-white.rounded-2xl,
+.pf-corporate-background .bg-white.rounded-3xl {
+  border-color: rgb(148 163 184 / 0.42);
+  box-shadow: 0 8px 18px rgb(15 23 42 / 0.06), 0 20px 40px rgb(15 23 42 / 0.05);
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.pf-corporate-background .bg-white.rounded-xl:hover,
+.pf-corporate-background .bg-white.rounded-2xl:hover,
+.pf-corporate-background .bg-white.rounded-3xl:hover {
+  border-color: rgb(52 211 153 / 0.42);
+  box-shadow: 0 14px 26px rgb(15 23 42 / 0.10), 0 28px 52px rgb(16 185 129 / 0.08);
+  transform: translateY(-3px);
+}
+
+#configuracion > form > label {
+  display: block;
+  border: 1px solid rgb(226 232 240 / 0.9);
+  border-radius: 1rem;
+  background: rgb(248 250 252 / 0.7);
+  padding: 1rem;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+#configuracion > form > label:focus-within {
+  border-color: rgb(52 211 153 / 0.65);
+  background: rgb(255 255 255 / 0.95);
+  box-shadow: 0 8px 24px rgb(16 185 129 / 0.08);
+}
+
+#configuracion.pf-card-3d:hover {
+  border-color: rgb(148 163 184 / 0.48);
+  box-shadow: 0 14px 26px rgb(15 23 42 / 0.1), 0 28px 52px rgb(16 185 129 / 0.08);
+  transform: translateY(-4px) perspective(1000px) translateZ(8px);
+}
+
 .dark body,
 .dark .pf-corporate-background {
   background-color: #0b1220;
@@ -28,7 +96,7 @@
 
 .dark .pf-corporate-background {
   background-image:
-    linear-gradient(135deg, rgb(11 18 32 / 0.91), rgb(6 78 59 / 0.74)),
+    linear-gradient(135deg, rgb(11 18 32 / 0.86), rgb(6 78 59 / 0.66)),
     url("/pagofacil-corporate-background.jpg");
 }
 
@@ -36,6 +104,22 @@
   border-color: rgb(255 255 255 / 0.12);
   background: rgb(15 23 42 / 0.82);
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.22);
+}
+
+.dark .pf-card-3d,
+.dark .pf-corporate-background .bg-white.rounded-xl,
+.dark .pf-corporate-background .bg-white.rounded-2xl,
+.dark .pf-corporate-background .bg-white.rounded-3xl {
+  border-color: rgb(255 255 255 / 0.14);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.22), 0 24px 48px rgb(0 0 0 / 0.18);
+}
+
+.dark .pf-card-3d:hover,
+.dark .pf-corporate-background .bg-white.rounded-xl:hover,
+.dark .pf-corporate-background .bg-white.rounded-2xl:hover,
+.dark .pf-corporate-background .bg-white.rounded-3xl:hover {
+  border-color: rgb(52 211 153 / 0.4);
+  box-shadow: 0 16px 30px rgb(0 0 0 / 0.3), 0 28px 58px rgb(16 185 129 / 0.12);
 }
 
 .dark .pf-corporate-background .text-slate-900,

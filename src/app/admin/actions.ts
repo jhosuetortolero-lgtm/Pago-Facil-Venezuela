@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getExchangeRates } from "@/lib/exchange-rate";
 
 const storeSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -120,16 +121,20 @@ export async function updateStore(formData: FormData) {
 export async function refreshAutomaticRate() {
   const { supabase, store } = await ownedStore();
   if (!store) return;
+  const rates = await getExchangeRates();
+  if (rates.official.value === null)
+    redirect("/admin/dashboard?error=No%20se%20pudo%20obtener%20la%20tasa%20BCV%20real.");
   // Mock da consulta diária à taxa BCV; será substituído por Cron/API na próxima etapa.
   await supabase
     .from("stores")
     .update({
       exchange_rate_mode: "automatic",
-      current_exchange_rate: 36.5,
+      current_exchange_rate: rates.official.value,
       exchange_rate_updated_at: new Date().toISOString(),
     })
     .eq("id", store.id);
-  revalidatePath("/admin/dashboard");
+  revalidatePath("/admin/dashboard", "page");
+  redirect("/admin/dashboard?section=settings#configuracion");
 }
 
 export async function createProduct(formData: FormData) {

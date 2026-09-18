@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createStoreWithPlan, toggleStoreStatus, signOut } from "./actions";
+import { createStoreWithPlan, inviteUser, renewSubscription, toggleStoreStatus, signOut } from "./actions";
 import AdminDashboard from "./dashboard-client";
+import { getExchangeRates } from "@/lib/exchange-rate";
 
 export default async function SuperAdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; invited?: string }>;
 }) {
   const supabase = await createClient();
   const {
@@ -38,7 +39,7 @@ export default async function SuperAdminPage({
     ? await Promise.all([
         supabase
           .from("store_subscriptions")
-          .select("store_id, plan_code, price_usd")
+          .select("store_id, plan_code, price_usd, current_period_end")
           .in("store_id", storeIds),
       ])
     : [{ data: [] }];
@@ -55,6 +56,10 @@ export default async function SuperAdminPage({
         .select("id, email, status")
         .in("id", ownerIds)
     : { data: [] };
+  const { data: allProfiles } = await supabase
+    .from("profiles")
+    .select("id, email, is_super_admin, status, created_at")
+    .order("created_at", { ascending: false });
 
   const profileById = new Map(
     (profiles ?? []).map((profile) => [profile.id, profile]),
@@ -73,6 +78,7 @@ export default async function SuperAdminPage({
       ? "Enterprise"
       : "Growth") as "Growth" | "Enterprise",
     price: subscriptionByStoreId.get(store.id)?.price_usd ?? null,
+    currentPeriodEnd: subscriptionByStoreId.get(store.id)?.current_period_end ?? null,
   }));
 
   const verifiedOrders = (orders ?? []).filter(
@@ -87,6 +93,7 @@ export default async function SuperAdminPage({
   );
 
   const params = await searchParams;
+  const exchangeRates = await getExchangeRates();
 
   return (
     <AdminDashboard
@@ -102,7 +109,18 @@ export default async function SuperAdminPage({
       error={params.error}
       onToggleStatus={toggleStoreStatus}
       onCreateStore={createStoreWithPlan}
+      onRenewSubscription={renewSubscription}
+      onInviteUser={inviteUser}
+      users={(allProfiles ?? []).map((profile) => ({
+        id: profile.id,
+        name: profile.email.split("@")[0],
+        email: profile.email,
+        role: profile.is_super_admin ? "Super Admin" : "Lojista",
+        last: "—",
+        status: profile.status,
+      }))}
       onSignOut={signOut}
+      exchangeRates={exchangeRates}
     />
   );
 }

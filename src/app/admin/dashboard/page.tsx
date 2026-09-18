@@ -2,8 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { createStore, refreshAutomaticRate, updateStore } from "../actions";
 import { ExchangeRateToggle } from "@/components/exchange-rate-toggle";
-import { Activity, Boxes, Clock3, DollarSign } from "lucide-react";
+import { Activity, AlertTriangle, Boxes, Clock3, DollarSign, MessageCircle } from "lucide-react";
 import { MerchantSubmitButton } from "@/components/merchant-submit-button";
+import { ExchangeRateWidget } from "@/components/exchange-rate-widget";
+import { RenewalModalTrigger } from "@/components/renewal-modal-trigger";
+import { getExchangeRates } from "@/lib/exchange-rate";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +27,8 @@ export default async function DashboardPage({
     .eq("owner_id", user!.id)
     .maybeSingle();
   const params = await searchParams;
+  const exchangeRates = await getExchangeRates();
+  const currentBcvRate = exchangeRates.official.value ?? store?.current_exchange_rate ?? null;
   const isActive = store?.onboarding_status === "active";
   const [{ count: productCount }, { data: orderRows }] = store
     ? await Promise.all([
@@ -48,12 +53,23 @@ export default async function DashboardPage({
     : { data: [] };
   const plan = entitlements?.[0]?.plan_code ?? "growth";
   const planLimit = typeof entitlements?.[0]?.limits?.products === "number" ? entitlements[0].limits.products : null;
+  const { data: subscription } = store
+    ? await supabase.from("store_subscriptions").select("current_period_end, status").eq("store_id", store.id).maybeSingle()
+    : { data: null };
+  const periodEnd = subscription?.current_period_end ?? null;
+  const remainingDays = periodEnd ? Math.ceil((new Date(periodEnd).getTime() - new Date().getTime()) / 86400000) : null;
+  const subscriptionWarning = isActive && remainingDays !== null && remainingDays <= 5;
+  const planAmount = entitlements?.[0]?.price_usd !== null && entitlements?.[0]?.price_usd !== undefined
+    ? Number(entitlements[0].price_usd)
+    : null;
   return (
-    <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
+    <main className="mx-auto max-w-[1380px] space-y-8 px-5 py-8 sm:px-8 lg:px-10">
       <div>
-        <p className="text-sm text-slate-500">Panel del comerciante</p>
-        <h1 className="text-3xl font-semibold">Resumen de tu negocio</h1>
+        <p className="text-xs font-medium text-slate-500">{new Date().toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })}</p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950 dark:text-white">¡Hola, {store?.name ?? "comerciante"}!</h1>
+        <p className="mt-2 text-sm text-slate-500">Aquí tienes una vista general de la actividad de tu tienda.</p>
       </div>
+      <ExchangeRateWidget rates={exchangeRates} />
       {params.error ? (
         <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {params.error}
@@ -64,6 +80,12 @@ export default async function DashboardPage({
           Configuración guardada correctamente. Tu tienda ya está lista para
           operar.
         </p>
+      ) : null}
+      {subscriptionWarning ? (
+        <div className={`sticky top-[80px] z-10 flex flex-col gap-4 rounded-2xl border px-5 py-4 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between ${remainingDays !== null && remainingDays <= 0 ? "border-red-300 bg-red-50/95 text-red-900" : "border-amber-300 bg-amber-50/95 text-amber-950"}`}>
+          <div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" /><div><p className="font-bold">Tu suscripción {remainingDays !== null && remainingDays <= 0 ? "está vencida" : `vence en ${remainingDays} días`}.</p><p className="mt-1 text-sm opacity-80">Renueva ahora para evitar la suspensión de tu tienda.</p></div></div>
+          <RenewalModalTrigger storeName={store?.name ?? "mi tienda"} plan={plan} amount={planAmount} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"><MessageCircle className="h-4 w-4" /> Renovar ahora</RenewalModalTrigger>
+        </div>
       ) : null}
       {!store ? (
         <section className="max-w-xl rounded-xl border bg-white p-6">
@@ -93,7 +115,7 @@ export default async function DashboardPage({
           </form>
         </section>
       ) : (
-        <section className="pf-glass-panel rounded-2xl border p-6">
+        <section className="rounded-2xl border-0 bg-transparent p-0">
           <h2 className="text-xl font-semibold">
             {isActive ? "Panel principal" : "Configuración de pagos"}
           </h2>
@@ -148,6 +170,10 @@ export default async function DashboardPage({
                         ? `$${Number(entitlements[0].price_usd).toFixed(2)} / mes`
                         : "Precio mensual configurado por el administrador"}
                     </p>
+                    <p className={`mt-3 text-sm font-bold ${remainingDays !== null && remainingDays <= 5 ? "text-red-600" : "text-emerald-700"}`}>
+                      {remainingDays === null ? "Fecha de corte no configurada" : remainingDays <= 0 ? "Suscripción vencida" : `Vence el ${new Date(periodEnd!).toLocaleDateString("es-VE")} · Quedan ${remainingDays} días`}
+                    </p>
+                    <RenewalModalTrigger storeName={store?.name ?? "mi tienda"} plan={plan} amount={planAmount} className="mt-3 inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:underline"><MessageCircle className="h-4 w-4" /> Contactar soporte para renovar</RenewalModalTrigger>
                   </div>
                   <div className="min-w-48">
                     <div className="flex justify-between text-xs font-semibold text-slate-500">
@@ -171,9 +197,9 @@ export default async function DashboardPage({
               </div>
             </div>
           ) : null}
-          <details id="configuracion" className="mt-8 border-t pt-6" open={!isActive || params.section === "settings"}>
-            <summary className="cursor-pointer list-none text-lg font-semibold">Configuración de pagos</summary>
-          <form action={updateStore} className="mt-6 grid max-w-2xl gap-4">
+          <details id="configuracion" className="pf-card-3d mt-8 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/30" open={!isActive || params.section === "settings"}>
+            <summary className="cursor-pointer list-none border-b border-slate-200/80 px-6 py-5 text-lg font-bold text-slate-900 transition hover:bg-emerald-50/50"><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-100 text-emerald-700">⚙</span><span><span className="block">Configuración de pagos</span><span className="mt-0.5 block text-xs font-normal text-slate-500">Administra tus datos de cobro y la tasa de cambio.</span></span></span></summary>
+          <form action={updateStore} className="grid max-w-5xl gap-4 p-6 md:grid-cols-2">
             <label className="text-sm font-medium">
               Nombre de la tienda
               <input
@@ -240,17 +266,16 @@ export default async function DashboardPage({
                 className="mt-1 h-11 w-full rounded-lg border px-3"
               />
             </label>
-            <div className="border-t pt-4">
-              <p className="mb-3 text-sm font-medium">Tasa de cambio</p>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5 md:col-span-2">
+              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><p className="text-sm font-bold text-emerald-950">Tasa de cambio</p><p className="mt-1 text-xs text-emerald-900/70">Usa la tasa BCV real para convertir tus precios en bolívares.</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-emerald-800">{currentBcvRate ? `Bs. ${Number(currentBcvRate).toFixed(2)}` : "Sin actualizar"}</span></div>
               <ExchangeRateToggle
                 automatic={store.exchange_rate_mode === "automatic"}
               />
               <p className="mt-2 text-xs text-slate-500">
-                Tasa BCV simulada actual:{" "}
-                {store.current_exchange_rate ?? "sin actualizar"}
+                Tasa BCV real de hoy: {currentBcvRate ? `Bs. ${Number(currentBcvRate).toFixed(2)}` : "sin actualizar"}. El widget del panel utiliza la misma fuente.
               </p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 md:col-span-2">
               <MerchantSubmitButton>Guardar configuración</MerchantSubmitButton>
               <button
                 formAction={refreshAutomaticRate}

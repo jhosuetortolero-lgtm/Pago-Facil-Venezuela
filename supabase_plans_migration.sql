@@ -44,6 +44,8 @@ create table if not exists public.store_subscriptions (
   updated_at timestamptz not null default now()
 );
 
+alter table public.store_subscriptions add column if not exists current_period_end timestamptz;
+
 alter table public.plans enable row level security;
 alter table public.store_subscriptions enable row level security;
 
