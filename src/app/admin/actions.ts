@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getExchangeRates } from "@/lib/exchange-rate";
 
 const storeSchema = z.object({
@@ -44,6 +45,35 @@ const productSchema = z.object({
 });
 const productUpdateSchema = productSchema.extend({ product_id: z.string().uuid() });
 const orderActionSchema = z.object({ order_id: z.string().uuid() });
+
+const productImageTypes = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+} as const;
+
+async function uploadProductImage(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  storeId: string,
+  value: FormDataEntryValue | null,
+) {
+  if (!(value instanceof File) || value.size === 0) return null;
+  if (!(value.type in productImageTypes) || value.size > 5 * 1024 * 1024) {
+    redirect("/admin/products?error=La%20imagen%20debe%20ser%20PNG%2C%20JPG%20o%20WebP%20y%20pesar%20menos%20de%205MB.");
+  }
+  const extension = productImageTypes[value.type as keyof typeof productImageTypes];
+  const path = `${storeId}/${crypto.randomUUID()}.${extension}`;
+  const uploadOptions = {
+    contentType: value.type,
+    upsert: false,
+  };
+  const admin = createAdminClient();
+  await admin.storage.createBucket("product-images", { public: true });
+  const storage = admin.storage.from("product-images");
+  const { error } = await storage.upload(path, value, uploadOptions);
+  if (error) redirect("/admin/products?error=No%20se%20pudo%20subir%20la%20imagen.%20Verifica%20el%20bucket%20product-images.");
+  return storage.getPublicUrl(path).data.publicUrl;
+}
 
 async function ownedStore() {
   const supabase = await createClient();
@@ -143,6 +173,7 @@ export async function createProduct(formData: FormData) {
   const parsed = productSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success || parsed.data.store_id !== store.id)
     redirect("/admin/products?error=Datos%20de%20producto%20inválidos.");
+  const imageUrl = await uploadProductImage(supabase, store.id, formData.get("image_file"));
   const { data: entitlements } = await supabase.rpc("get_store_entitlements", {
     target_store_id: store.id,
   });
@@ -162,7 +193,7 @@ export async function createProduct(formData: FormData) {
   const { store_id, ...product } = parsed.data;
   const { error } = await supabase
     .from("products")
-    .insert({ ...product, store_id });
+    .insert({ ...product, image_url: imageUrl, store_id });
   if (error)
     redirect("/admin/products?error=No%20se%20pudo%20crear%20el%20producto.");
   revalidatePath("/admin/products");
@@ -186,8 +217,9 @@ export async function updateProduct(formData: FormData) {
   const parsed = productUpdateSchema.safeParse(Object.fromEntries(formData));
   if (!store || !parsed.success || parsed.data.store_id !== store.id)
     redirect("/admin/products?error=Datos%20de%20producto%20inv%C3%A1lidos.");
+  const imageUrl = await uploadProductImage(supabase, store.id, formData.get("image_file"));
   const { product_id, store_id, ...product } = parsed.data;
-  const { error } = await supabase.from("products").update(product).eq("id", product_id).eq("store_id", store_id);
+  const { error } = await supabase.from("products").update({ ...product, ...(imageUrl ? { image_url: imageUrl } : {}) }).eq("id", product_id).eq("store_id", store_id);
   if (error) redirect("/admin/products?error=No%20se%20pudo%20actualizar%20el%20producto.");
   revalidatePath("/admin/products");
   redirect("/admin/products?updated=1");

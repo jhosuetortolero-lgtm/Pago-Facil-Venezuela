@@ -220,12 +220,6 @@ export default async function ProductsPage({
                 <p className="mt-1 text-sm text-slate-500">
                   Crea tu primer producto para comenzar a vender.
                 </p>
-                <div className="mt-5">
-                  <MerchantProductForm
-                    storeId={store.id}
-                    action={createProduct}
-                  />
-                </div>
               </div>
             )}
           </section>

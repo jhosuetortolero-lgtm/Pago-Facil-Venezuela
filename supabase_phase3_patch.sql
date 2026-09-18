@@ -41,6 +41,22 @@ alter table public.orders add constraint orders_status_check check (status in ('
 insert into storage.buckets (id, name, public) values ('payment-proofs', 'payment-proofs', false)
 on conflict (id) do update set public = false;
 
+insert into storage.buckets (id, name, public) values ('product-images', 'product-images', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "product_images_owner_insert" on storage.objects;
+create policy "product_images_owner_insert" on storage.objects for insert to authenticated
+with check (bucket_id = 'product-images' and exists (select 1 from public.stores where id = (storage.foldername(name))[1]::uuid and owner_id = (select auth.uid())));
+
+drop policy if exists "product_images_owner_update" on storage.objects;
+create policy "product_images_owner_update" on storage.objects for update to authenticated
+using (bucket_id = 'product-images' and exists (select 1 from public.stores where id = (storage.foldername(name))[1]::uuid and owner_id = (select auth.uid())))
+with check (bucket_id = 'product-images' and exists (select 1 from public.stores where id = (storage.foldername(name))[1]::uuid and owner_id = (select auth.uid())));
+
+drop policy if exists "product_images_owner_delete" on storage.objects;
+create policy "product_images_owner_delete" on storage.objects for delete to authenticated
+using (bucket_id = 'product-images' and exists (select 1 from public.stores where id = (storage.foldername(name))[1]::uuid and owner_id = (select auth.uid())));
+
 drop function if exists public.get_storefront(text);
 create function public.get_storefront(requested_slug text)
 returns table (store_name text, store_slug text, product_id uuid, product_name text, product_description text, price_usd numeric, zelle_email text, pago_movil_phone text, pago_movil_bank text, pago_movil_id text, binance_pay_id text)
