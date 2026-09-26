@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { BrandLogo } from "@/components/brand-logo";
 import { StorefrontCart } from "@/components/storefront-cart";
 import { StorefrontProduct } from "@/components/storefront-product";
-import { getExchangeRates } from "@/lib/exchange-rate";
+import {
+  getExchangeRates,
+  resolveStoreExchangeRate,
+} from "@/lib/exchange-rate";
 import { createClient } from "@/lib/supabase/server";
 
 type StorefrontRow = {
@@ -17,6 +20,10 @@ type StorefrontRow = {
   pago_movil_bank: string | null;
   pago_movil_id: string | null;
   binance_pay_id: string | null;
+  exchange_rate_mode: "automatic" | "manual";
+  manual_exchange_rate: number | null;
+  current_exchange_rate: number | null;
+  exchange_rate_updated_at: string | null;
 };
 
 export default async function StorefrontPage({
@@ -36,6 +43,7 @@ export default async function StorefrontPage({
   if (error || !data?.length) notFound();
 
   const store = data[0];
+  const storeExchangeRate = resolveStoreExchangeRate(store, exchangeRates);
   const products = data.filter(
     (
       item,
@@ -81,7 +89,7 @@ export default async function StorefrontPage({
               pago_movil_id: store.pago_movil_id,
               binance_pay_id: store.binance_pay_id,
             }}
-            exchangeRate={exchangeRates.official.value}
+            exchangeRate={storeExchangeRate}
           />
         </div>
       </div>

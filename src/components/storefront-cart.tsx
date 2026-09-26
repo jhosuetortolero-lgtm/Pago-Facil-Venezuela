@@ -2,6 +2,7 @@
 
 import { CheckoutModal } from "@/components/checkout-modal";
 import { useCart } from "@/lib/cart";
+import type { StoreExchangeRate } from "@/lib/exchange-rate";
 
 type PaymentDetails = {
   zelle_email: string | null;
@@ -18,7 +19,7 @@ export function StorefrontCart({
 }: {
   storeSlug: string;
   paymentDetails: PaymentDetails;
-  exchangeRate: number | null;
+  exchangeRate: StoreExchangeRate;
 }) {
   const { items, remove, updateQuantity } = useCart();
   const total = items.reduce((sum, item) => sum + item.price_usd * item.quantity, 0);

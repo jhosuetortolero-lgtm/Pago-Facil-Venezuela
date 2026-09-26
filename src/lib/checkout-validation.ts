@@ -5,21 +5,51 @@ const checkoutItemSchema = z.object({
   quantity: z.coerce.number().int().min(1).max(999),
 });
 
-export const checkoutSchema = z.object({
-  storeSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  customerName: z.string().trim().max(120).optional().or(z.literal("")),
-  customerPhone: z.string().trim().min(7).max(20),
-  paymentMethod: z.enum(["zelle", "pago_movil", "binance_pay"]),
-  totalUsd: z.coerce.number().positive().finite(),
-  items: z
-    .array(checkoutItemSchema)
-    .min(1)
-    .max(100)
-    .refine(
-      (items) => new Set(items.map((item) => item.id)).size === items.length,
-      "El carrito contiene productos duplicados.",
-    ),
-});
+const optionalPositiveNumber = z.preprocess(
+  (value) => (value === null || value === "" ? null : value),
+  z.coerce.number().positive().finite().nullable(),
+);
+
+export const checkoutSchema = z
+  .object({
+    storeSlug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    customerName: z.string().trim().max(120).optional().or(z.literal("")),
+    customerPhone: z.string().trim().min(7).max(20),
+    paymentMethod: z.enum(["zelle", "pago_movil", "binance_pay"]),
+    totalUsd: z.coerce.number().positive().finite(),
+    exchangeRate: optionalPositiveNumber,
+    totalVes: optionalPositiveNumber,
+    items: z
+      .array(checkoutItemSchema)
+      .min(1)
+      .max(100)
+      .refine(
+        (items) => new Set(items.map((item) => item.id)).size === items.length,
+        "El carrito contiene productos duplicados.",
+      ),
+  })
+  .superRefine((checkout, context) => {
+    if (
+      checkout.paymentMethod === "pago_movil" &&
+      (checkout.exchangeRate === null || checkout.totalVes === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Pago Móvil requiere una cotización VES válida.",
+        path: ["exchangeRate"],
+      });
+    }
+    if (
+      checkout.paymentMethod !== "pago_movil" &&
+      (checkout.exchangeRate !== null || checkout.totalVes !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "La cotización VES solo aplica a Pago Móvil.",
+        path: ["exchangeRate"],
+      });
+    }
+  });
 
 const ocrPlatformSchema = z.enum([
   "zelle",

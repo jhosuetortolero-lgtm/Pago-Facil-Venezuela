@@ -48,11 +48,17 @@ create table public.orders (
   customer_name text,
   customer_phone text,
   total_usd numeric(12, 2) not null check (total_usd > 0),
+  exchange_rate_used numeric(18, 6) check (exchange_rate_used is null or exchange_rate_used > 0),
+  total_ves numeric(18, 2) check (total_ves is null or total_ves > 0),
   payment_method text not null check (payment_method in ('zelle', 'pago_movil', 'binance_pay')),
   status text not null default 'pending' check (status in ('pending', 'verified', 'fraud_alert', 'fraud_alert_duplicate', 'manual_review', 'cancelled')),
   payment_reference text,
   payment_proof_path text,
   ocr_data jsonb,
+  constraint orders_pago_movil_exchange_snapshot check (
+    payment_method <> 'pago_movil'
+    or (exchange_rate_used is not null and total_ves is not null)
+  ),
   constraint orders_payment_method_reference_unique unique (payment_method, payment_reference),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -100,9 +106,9 @@ create policy "orders_super_admin_update" on public.orders for update to authent
 
 -- A vitrine consulta apenas campos públicos e nunca expõe owner_id.
 create or replace function public.get_storefront(requested_slug text)
-returns table (store_name text, store_slug text, product_id uuid, product_name text, product_description text, price_usd numeric, zelle_email text, pago_movil_phone text, pago_movil_bank text, pago_movil_id text, binance_pay_id text)
+returns table (store_name text, store_slug text, product_id uuid, product_name text, product_description text, price_usd numeric, zelle_email text, pago_movil_phone text, pago_movil_bank text, pago_movil_id text, binance_pay_id text, exchange_rate_mode text, manual_exchange_rate numeric, current_exchange_rate numeric, exchange_rate_updated_at timestamptz)
 language sql security definer set search_path = public stable as $$
-  select s.name, s.slug, p.id, p.name, p.description, p.price_usd, s.zelle_email, s.pago_movil_phone, s.pago_movil_bank, s.pago_movil_id, s.binance_pay_id
+  select s.name, s.slug, p.id, p.name, p.description, p.price_usd, s.zelle_email, s.pago_movil_phone, s.pago_movil_bank, s.pago_movil_id, s.binance_pay_id, s.exchange_rate_mode, s.manual_exchange_rate, s.current_exchange_rate, s.exchange_rate_updated_at
   from public.stores s
   left join public.products p on p.store_id = s.id and p.is_active = true
   join public.profiles owner_profile on owner_profile.id = s.owner_id and owner_profile.status = 'active'

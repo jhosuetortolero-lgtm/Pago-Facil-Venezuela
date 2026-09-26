@@ -30,7 +30,6 @@ import {
   ShoppingBag,
   Store,
   TrendingUp,
-  Trash2,
   UserRound,
   Users,
   X,
@@ -46,10 +45,9 @@ type StoreRow = {
   id: string;
   name: string;
   slug: string;
-  ownerId: string;
   email: string;
   status: StoreStatus;
-  plan?: PlanName;
+  plan: PlanName | null;
   price?: number | null;
   currentPeriodEnd?: string | null;
 };
@@ -58,8 +56,29 @@ type UserRow = {
   name: string;
   email: string;
   role: string;
-  last: string;
+  registeredAt: string;
   status: string;
+};
+type OrderStatus =
+  | "pending"
+  | "verified"
+  | "manual_review"
+  | "fraud_alert"
+  | "fraud_alert_duplicate"
+  | "cancelled";
+export type OrderRow = {
+  id: string;
+  storeName: string;
+  totalUsd: number;
+  paymentMethod: "zelle" | "pago_movil" | "binance_pay";
+  status: OrderStatus;
+  createdAt: string;
+};
+export type SalesSummary = {
+  totalLast30Days: number;
+  ordersToday: number;
+  verifiedToday: number;
+  daily: Array<{ date: string; totalUsd: number; orderCount: number }>;
 };
 type ServerAction = (formData: FormData) => void | Promise<void>;
 type Props = {
@@ -71,6 +90,8 @@ type Props = {
     totalSales: number;
     pendingOrders: number;
   };
+  orders: OrderRow[];
+  salesSummary: SalesSummary;
   error?: string;
   onToggleStatus: ServerAction;
   onCreateStore: ServerAction;
@@ -105,7 +126,7 @@ const copy = {
     administrator: "Administrador",
     greeting: "¡Hola, administrador!",
     summary: "Aquí tienes una vista general de la actividad de PagoFácil.",
-    online: "Sistema operativo",
+    online: "Datos sincronizados con Supabase",
     registeredStores: "Tiendas registradas",
     activeStores: "Tiendas activas",
     processedSales: "Ventas procesadas",
@@ -132,7 +153,6 @@ const copy = {
     actions: "Acciones",
     activate: "Activar",
     deactivate: "Desactivar",
-    waitingProfile: "Esperando perfil",
     details: "Ver detalles",
     copyLink: "Copiar enlace",
     copied: "¡Copiado!",
@@ -142,7 +162,7 @@ const copy = {
     of: "de",
     synced: "Datos sincronizados con Supabase",
     notifications: "Notificaciones",
-    systemNormal: "El sistema está operando con normalidad.",
+    systemNormal: "No hay órdenes pendientes de revisión.",
     newStoreTitle: "Nueva tienda",
     newStoreDescription: "Prepara el alta de un nuevo comercio en PagoFácil.",
     storeName: "Nombre de la tienda",
@@ -170,7 +190,7 @@ const copy = {
     administrator: "Administrator",
     greeting: "Hello, administrator!",
     summary: "Here is an overview of PagoFácil activity.",
-    online: "System operational",
+    online: "Data synced with Supabase",
     registeredStores: "Registered stores",
     activeStores: "Active stores",
     processedSales: "Processed sales",
@@ -197,7 +217,6 @@ const copy = {
     actions: "Actions",
     activate: "Activate",
     deactivate: "Deactivate",
-    waitingProfile: "Waiting for profile",
     details: "View details",
     copyLink: "Copy link",
     copied: "Copied!",
@@ -207,7 +226,7 @@ const copy = {
     of: "of",
     synced: "Data synced with Supabase",
     notifications: "Notifications",
-    systemNormal: "The system is operating normally.",
+    systemNormal: "There are no orders pending review.",
     newStoreTitle: "New store",
     newStoreDescription: "Prepare a new merchant onboarding in PagoFácil.",
     storeName: "Store name",
@@ -230,7 +249,8 @@ type Translation = Record<keyof typeof copy.ES, string>;
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 function initials(name: string) {
@@ -292,62 +312,6 @@ function KpiCard({
   );
 }
 
-type DemoStore = {
-  id: string;
-  name: string;
-  owner: string;
-  email: string;
-  plan: PlanName;
-  price?: number | null;
-  status: "active" | "pending" | "inactive";
-  currentPeriodEnd?: string | null;
-};
-type DemoSale = {
-  id: string;
-  store: string;
-  amount: string;
-  method: string;
-  status: "approved" | "review" | "rejected";
-  date: string;
-};
-
-const demoStores: DemoStore[] = [
-  {
-    id: "PF-0001",
-    name: "Café Central",
-    owner: "María González",
-    email: "maria@cafecentral.ve",
-    plan: "Enterprise",
-    status: "active",
-  },
-  {
-    id: "PF-0002",
-    name: "TechNova Store",
-    owner: "Carlos Rivas",
-    email: "carlos@technova.ve",
-    plan: "Growth",
-    price: 29,
-    status: "active",
-  },
-  {
-    id: "PF-0003",
-    name: "Moda Caracas",
-    owner: "Valentina Pérez",
-    email: "valentina@modacaracas.ve",
-    plan: "Growth",
-    price: 29,
-    status: "pending",
-  },
-  {
-    id: "PF-0004",
-    name: "Casa Verde",
-    owner: "Andrés Molina",
-    email: "andres@casaverde.ve",
-    plan: "Growth",
-    price: 29,
-    status: "inactive",
-  },
-];
 const planOptions: Array<{
   name: PlanName;
   price: number | null;
@@ -367,73 +331,7 @@ const planOptions: Array<{
     description: { ES: "Precio configurable", EN: "Configurable price" },
   },
 ];
-const demoSales: DemoSale[] = [
-  {
-    id: "#ORD-84291",
-    store: "Café Central",
-    amount: "USD 86.50 / Bs. 3.156,42",
-    method: "Pago Móvil",
-    status: "approved",
-    date: "Hoy, 10:42 AM",
-  },
-  {
-    id: "#ORD-84290",
-    store: "TechNova Store",
-    amount: "USD 249.00 / Bs. 9.088,50",
-    method: "Zelle",
-    status: "review",
-    date: "Hoy, 09:18 AM",
-  },
-  {
-    id: "#ORD-84289",
-    store: "Bodega 24/7",
-    amount: "USD 42.00 / Bs. 1.533,00",
-    method: "Binance Pay",
-    status: "approved",
-    date: "Ayer, 06:52 PM",
-  },
-  {
-    id: "#ORD-84288",
-    store: "Moda Caracas",
-    amount: "USD 118.00 / Bs. 4.307,00",
-    method: "Pago Móvil",
-    status: "rejected",
-    date: "Ayer, 04:31 PM",
-  },
-];
-const demoUsers = [
-  {
-    name: "Bruno Superadmin",
-    email: "bruno@pagofacil.com",
-    role: "Super Admin",
-    last: "Hace 4 min",
-    status: "active",
-  },
-  {
-    name: "María González",
-    email: "maria@cafecentral.ve",
-    role: "Lojista",
-    last: "Hoy, 10:44 AM",
-    status: "active",
-  },
-  {
-    name: "Carlos Rivas",
-    email: "carlos@technova.ve",
-    role: "Lojista",
-    last: "Ayer, 06:21 PM",
-    status: "active",
-  },
-  {
-    name: "Valentina Pérez",
-    email: "valentina@modacaracas.ve",
-    role: "Lojista",
-    last: "Nunca",
-    status: "pending",
-  },
-];
-void demoUsers;
-
-function DemoBadge({
+function StatusBadge({
   children,
   tone,
 }: {
@@ -491,17 +389,6 @@ function SectionFrame({
   );
 }
 
-/* Legacy implementation kept out of the active UI.
-function LegacyStoresView({ language, sourceStores }: { language: Language; sourceStores: StoreRow[] }) {
-  const es = language === "ES";
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
-  const rows: DemoStore[] = sourceStores.length ? sourceStores.map((item) => ({ id: item.id.slice(0, 8).toUpperCase(), name: item.name, owner: item.email.split("@")[0], email: item.email, plan: "Growth", price: null, status: item.status === "suspended" ? "inactive" : item.status })) : demoStores;
-  const filtered = rows.filter((row) => (row.name + row.owner + row.email).toLowerCase().includes(query.toLowerCase()) && (filter === "all" || row.status === filter));
-  return <SectionFrame language={language} title={es ? "Tiendas" : "Stores"} description={es ? "Administra comercios, planes y accesos desde un solo lugar." : "Manage merchants, plans and access from one place."} action={<button type="button" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"><Plus className="h-4 w-4" />{es ? "Nueva tienda" : "New store"}</button>}><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40"><div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row"><label className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={es ? "Buscar tienda, propietario o correo..." : "Search store, owner or email..."} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-emerald-400 focus:bg-white" /></label><select value={filter} onChange={(event) => setFilter(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm"><option value="all">{es ? "Todos los estados" : "All statuses"}</option><option value="active">{es ? "Activas" : "Active"}</option><option value="pending">{es ? "Pendientes" : "Pending"}</option><option value="inactive">{es ? "Inactivas" : "Inactive"}</option></select><button type="button" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"><Filter className="h-4 w-4" />{es ? "Filtros" : "Filters"}</button></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-4">ID</th><th className="px-5 py-4">{es ? "Nombre de la tienda" : "Store name"}</th><th className="px-5 py-4">{es ? "Propietario" : "Owner"}</th><th className="px-5 py-4">Plan</th><th className="px-5 py-4">{es ? "Estado" : "Status"}</th><th className="px-5 py-4 text-right">{es ? "Acciones" : "Actions"}</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-5 py-4 font-mono text-xs text-slate-500">{row.id}</td><td className="px-5 py-4"><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-xs font-bold text-emerald-700">{initials(row.name)}</div><div><p className="font-semibold text-slate-800">{row.name}</p><p className="text-xs text-slate-500">{row.email}</p></div></div></td><td className="px-5 py-4"><p className="font-medium text-slate-700">{row.owner}</p><p className="text-xs text-slate-400">{row.email}</p></td><td className="px-5 py-4"><DemoBadge tone={row.plan === "Enterprise" ? "blue" : row.plan === "Growth" ? "green" : "slate"}>{row.plan}</DemoBadge></td><td className="px-5 py-4"><DemoBadge tone={row.status === "active" ? "green" : row.status === "pending" ? "amber" : "slate"}>{row.status === "active" ? (es ? "Activa" : "Active") : row.status === "pending" ? (es ? "Pendiente" : "Pending") : (es ? "Inactiva" : "Inactive")}</DemoBadge></td><td className="px-5 py-4 text-right"><button type="button" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-200 hover:bg-emerald-50">{row.status === "active" ? (es ? "Desactivar" : "Deactivate") : (es ? "Activar" : "Activate")}</button></td></tr>)}</tbody></table></div><div className="border-t border-slate-200 px-5 py-4 text-xs text-slate-500">{es ? "Mostrando" : "Showing"} <b>{filtered.length}</b> {es ? "de" : "of"} <b>{rows.length}</b> {es ? "tiendas" : "stores"}</div></div></SectionFrame>;
-}
-
-*/
 function subscriptionRemaining(end: string | null | undefined, es: boolean) {
   if (!end) return { label: es ? "Sin fecha" : "No date", tone: "slate" as const };
   const days = Math.ceil((new Date(end).getTime() - Date.now()) / 86400000);
@@ -514,64 +401,36 @@ function StoresView({
   sourceStores,
   onCreateStore,
   onRenewSubscription,
+  onToggleStatus,
 }: {
   language: Language;
   sourceStores: StoreRow[];
   onCreateStore: ServerAction;
   onRenewSubscription: ServerAction;
+  onToggleStatus: ServerAction;
 }) {
   const es = language === "ES";
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState<"all" | StoreStatus>("all");
   const [newStoreOpen, setNewStoreOpen] = useState(false);
   const [newStoreSubmitted, setNewStoreSubmitted] = useState(false);
-  const [deletedIds, setDeletedIds] = useState<string[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, DemoStore["status"]>>(
-    {},
-  );
-  const rows: DemoStore[] = sourceStores.length
-    ? sourceStores.map((item) => ({
-        id: item.id,
-        name: item.name,
-        owner: item.email.split("@")[0],
-        email: item.email,
-        plan: item.plan ?? "Growth",
-        price: item.price,
-        status: item.status === "suspended" ? "inactive" : item.status,
-        currentPeriodEnd: item.currentPeriodEnd,
-      }))
-    : demoStores;
-  const visible = rows.filter(
+  const visible = sourceStores.filter(
     (row) =>
-      !deletedIds.includes(row.id) &&
-      (row.name + row.owner + row.email)
+      (row.name + row.email)
         .toLowerCase()
         .includes(query.toLowerCase()) &&
-      (filter === "all" || (statuses[row.id] ?? row.status) === filter),
+      (filter === "all" || row.status === filter),
   );
-  const formatPlanPrice = (row: DemoStore) =>
-    row.price
+  const formatPlanPrice = (row: StoreRow) =>
+    row.plan === null
+      ? es
+        ? "Sin suscripción"
+        : "No subscription"
+      : row.price != null
       ? `US$${row.price}/${es ? "mes" : "month"}`
       : es
         ? "Precio configurable"
         : "Configurable price";
-  const toggle = (id: string, current: DemoStore["status"]) =>
-    setStatuses((value) => ({
-      ...value,
-      [id]: current === "active" ? "inactive" : "active",
-    }));
-  const remove = (id: string, name: string) => {
-    if (
-      window.confirm(
-        es
-          ? "¿Eliminar la tienda " +
-              name +
-              "? Esta acción no se puede deshacer."
-          : "Delete " + name + "? This action cannot be undone.",
-      )
-    )
-      setDeletedIds((value) => [...value, id]);
-  };
   return (
     <SectionFrame
       language={language}
@@ -612,7 +471,9 @@ function StoresView({
           </label>
           <select
             value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={(event) =>
+              setFilter(event.target.value as "all" | StoreStatus)
+            }
             className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm"
           >
             <option value="all">
@@ -620,7 +481,9 @@ function StoresView({
             </option>
             <option value="active">{es ? "Activas" : "Active"}</option>
             <option value="pending">{es ? "Pendientes" : "Pending"}</option>
-            <option value="inactive">{es ? "Inactivas" : "Inactive"}</option>
+            <option value="suspended">
+              {es ? "Suspendidas" : "Suspended"}
+            </option>
           </select>
         </div>
         <div className="overflow-x-auto">
@@ -640,7 +503,8 @@ function StoresView({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visible.map((row) => {
-                const status = statuses[row.id] ?? row.status;
+                const nextStatus =
+                  row.status === "active" ? "suspended" : "active";
                 return (
                   <tr key={row.id} className="hover:bg-slate-50">
                     <td className="px-5 py-4 font-mono text-xs text-slate-500">
@@ -660,11 +524,10 @@ function StoresView({
                       </div>
                     </td>
                     <td className="px-5 py-4">
-                      <p className="font-medium text-slate-700">{row.owner}</p>
-                      <p className="text-xs text-slate-400">{row.email}</p>
+                      <p className="font-medium text-slate-700">{row.email}</p>
                     </td>
                     <td className="px-5 py-4">
-                      <DemoBadge
+                      <StatusBadge
                         tone={
                           row.plan === "Enterprise"
                             ? "blue"
@@ -673,65 +536,60 @@ function StoresView({
                               : "slate"
                         }
                       >
-                        {row.plan}
-                      </DemoBadge>
-                      <span className="mt-1 text-xs font-medium text-slate-500">
+                        {row.plan ?? (es ? "Sin plan" : "No plan")}
+                      </StatusBadge>
+                      <span className="mt-1 block text-xs font-medium text-slate-500">
                         {formatPlanPrice(row)}
                       </span>
                     </td>
                     <td className="px-5 py-4">
                       {(() => {
                         const subscription = subscriptionRemaining(row.currentPeriodEnd, es);
-                        return <div><DemoBadge tone={subscription.tone}>{subscription.label}</DemoBadge>{row.currentPeriodEnd ? <p className="mt-1 text-[11px] text-slate-400">{new Date(row.currentPeriodEnd).toLocaleDateString(es ? "es-VE" : "en-US")}</p> : null}</div>;
+                        return <div><StatusBadge tone={subscription.tone}>{subscription.label}</StatusBadge>{row.currentPeriodEnd ? <p className="mt-1 text-[11px] text-slate-400">{new Date(row.currentPeriodEnd).toLocaleDateString(es ? "es-VE" : "en-US")}</p> : null}</div>;
                       })()}
                     </td>
                     <td className="px-5 py-4">
-                      <DemoBadge
+                      <StatusBadge
                         tone={
-                          status === "active"
+                          row.status === "active"
                             ? "green"
-                            : status === "pending"
+                            : row.status === "pending"
                               ? "amber"
                               : "slate"
                         }
                       >
-                        {status === "active"
+                        {row.status === "active"
                           ? es
                             ? "Activa"
                             : "Active"
-                          : status === "pending"
+                          : row.status === "pending"
                             ? es
                               ? "Pendiente"
                               : "Pending"
                             : es
-                              ? "Inactiva"
-                              : "Inactive"}
-                      </DemoBadge>
+                              ? "Suspendida"
+                              : "Suspended"}
+                      </StatusBadge>
                     </td>
                     <td className="px-5 py-4 text-right">
                       <div className="inline-flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => toggle(row.id, status)}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-200 hover:bg-emerald-50"
-                        >
-                          {status === "active"
-                            ? es
-                              ? "Desactivar"
-                              : "Deactivate"
-                            : es
-                              ? "Activar"
-                              : "Activate"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => remove(row.id, row.name)}
-                          aria-label={es ? "Eliminar tienda" : "Delete store"}
-                          className="rounded-lg border border-rose-200 p-2 text-rose-600 hover:bg-rose-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                        {sourceStores.some((store) => store.id === row.id) ? (
+                        <form action={onToggleStatus}>
+                          <input type="hidden" name="store_id" value={row.id} />
+                          <input type="hidden" name="status" value={nextStatus} />
+                          <button
+                            type="submit"
+                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-200 hover:bg-emerald-50"
+                          >
+                            {row.status === "active"
+                              ? es
+                                ? "Suspender"
+                                : "Suspend"
+                              : es
+                                ? "Activar"
+                                : "Activate"}
+                          </button>
+                        </form>
+                        {row.plan ? (
                           <form action={onRenewSubscription}>
                             <input type="hidden" name="store_id" value={row.id} />
                             <button type="submit" className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
@@ -756,7 +614,7 @@ function StoresView({
         </div>
         <div className="border-t border-slate-200 px-5 py-4 text-xs text-slate-500">
           {es ? "Mostrando" : "Showing"} <b>{visible.length}</b>{" "}
-          {es ? "de" : "of"} <b>{rows.length - deletedIds.length}</b>{" "}
+          {es ? "de" : "of"} <b>{sourceStores.length}</b>{" "}
           {es ? "tiendas" : "stores"}
         </div>
       </div>
@@ -772,32 +630,73 @@ function StoresView({
   );
 }
 
-function SalesViewPrimary({ language }: { language: Language }) {
+function SalesViewPrimary({
+  language,
+  orders,
+  summary,
+}: {
+  language: Language;
+  orders: OrderRow[];
+  summary: SalesSummary;
+}) {
   const es = language === "ES";
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
-  const [selectedSale, setSelectedSale] = useState<DemoSale | null>(null);
-  const rows = demoSales.filter(
+  const [selectedSale, setSelectedSale] = useState<OrderRow | null>(null);
+  const category = (status: OrderStatus) =>
+    status === "verified"
+      ? "approved"
+      : status === "cancelled" || status.startsWith("fraud_alert")
+        ? "rejected"
+        : "review";
+  const rows = orders.filter(
     (row) =>
-      (row.id + row.store + row.method)
+      (row.id + row.storeName + row.paymentMethod)
         .toLowerCase()
         .includes(query.toLowerCase()) &&
-      (filter === "all" || row.status === filter),
+      (filter === "all" || category(row.status) === filter),
   );
-  const label = (status: DemoSale["status"]) =>
-    status === "approved"
-      ? es
-        ? "OCR aprobado"
-        : "OCR approved"
-      : status === "review"
-        ? es
-          ? "Revisión manual"
-          : "Manual review"
-          : es
-            ? "Rechazado"
-            : "Rejected";
+  const label = (status: OrderStatus) => {
+    const labels: Record<OrderStatus, { ES: string; EN: string }> = {
+      pending: { ES: "Pendiente", EN: "Pending" },
+      verified: { ES: "Verificada", EN: "Verified" },
+      manual_review: { ES: "Revisión manual", EN: "Manual review" },
+      fraud_alert: { ES: "Alerta de fraude", EN: "Fraud alert" },
+      fraud_alert_duplicate: {
+        ES: "Posible duplicado",
+        EN: "Possible duplicate",
+      },
+      cancelled: { ES: "Cancelada", EN: "Cancelled" },
+    };
+    return labels[status][language];
+  };
+  const paymentMethodLabel = (method: OrderRow["paymentMethod"]) =>
+    method === "pago_movil"
+      ? "Pago Móvil"
+      : method === "binance_pay"
+        ? "Binance Pay"
+        : "Zelle";
+  const formatOrderDate = (value: string) =>
+    new Intl.DateTimeFormat(es ? "es-VE" : "en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
   const exportCsv = () => {
-    const csv = ["ID,Tienda,Monto,Método,Estado,Fecha", ...rows.map((row) => [row.id, row.store, row.amount, row.method, label(row.status), row.date].map((value) => `"${value.replaceAll('"', '""')}"`).join(","))].join("\n");
+    const csv = [
+      "ID,Tienda,Monto,Método,Estado,Fecha",
+      ...rows.map((row) =>
+        [
+          row.id,
+          row.storeName,
+          row.totalUsd.toFixed(2),
+          paymentMethodLabel(row.paymentMethod),
+          label(row.status),
+          row.createdAt,
+        ]
+          .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
@@ -828,19 +727,68 @@ function SalesViewPrimary({ language }: { language: Language }) {
       <div className="grid gap-4 sm:grid-cols-2">
         <KpiCard
           label={es ? "Volumen total" : "Total volume"}
-          value="$24,890.40"
+          value={currency.format(summary.totalLast30Days)}
           detail={es ? "Últimos 30 días" : "Last 30 days"}
           icon={TrendingUp}
           accent="bg-emerald-50 text-emerald-600"
         />
         <KpiCard
           label={es ? "Órdenes hoy" : "Orders today"}
-          value="128"
-          detail={es ? "+18.6% vs. ayer" : "+18.6% vs. yesterday"}
+          value={summary.ordersToday.toLocaleString(es ? "es-VE" : "en-US")}
+          detail={
+            es
+              ? `${summary.verifiedToday} verificadas hoy`
+              : `${summary.verifiedToday} verified today`
+          }
           icon={Activity}
           accent="bg-blue-50 text-blue-600"
         />
       </div>
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/40 sm:p-6">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-slate-950">
+              {es ? "Ventas verificadas" : "Verified sales"}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {es ? "Actividad real de los últimos 7 días" : "Real activity over the last 7 days"}
+            </p>
+          </div>
+          <p className="text-xs font-semibold text-slate-500">
+            {summary.daily.reduce((sum, day) => sum + day.orderCount, 0)} {es ? "órdenes" : "orders"}
+          </p>
+        </div>
+        <div className="mt-6 grid h-56 grid-cols-7 items-end gap-2 sm:gap-4">
+          {summary.daily.map((day) => {
+            const maxTotal = Math.max(
+              ...summary.daily.map((item) => item.totalUsd),
+              1,
+            );
+            const height = day.totalUsd > 0 ? Math.max((day.totalUsd / maxTotal) * 100, 4) : 1;
+            const dayLabel = new Intl.DateTimeFormat(es ? "es-VE" : "en-US", {
+              weekday: "short",
+              timeZone: "UTC",
+            }).format(new Date(`${day.date}T00:00:00Z`));
+            return (
+              <div key={day.date} className="flex h-full min-w-0 flex-col justify-end gap-2 text-center">
+                <span className="truncate text-[10px] font-semibold text-slate-500 sm:text-xs">
+                  {currency.format(day.totalUsd)}
+                </span>
+                <div className="flex h-40 items-end rounded-xl bg-slate-50 px-1 sm:px-2">
+                  <div
+                    className="w-full rounded-t-lg bg-emerald-500 transition-[height]"
+                    style={{ height: `${height}%` }}
+                    title={`${day.orderCount} ${es ? "órdenes" : "orders"}`}
+                  />
+                </div>
+                <span className="text-[10px] font-semibold uppercase text-slate-500 sm:text-xs">
+                  {dayLabel}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40">
         <div className="flex gap-3 border-b border-slate-200 p-5">
           <label className="relative flex-1">
@@ -892,28 +840,32 @@ function SalesViewPrimary({ language }: { language: Language }) {
               {rows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50">
                   <td className="px-5 py-4 font-mono text-xs font-semibold">
-                    {row.id}
+                    {row.id.slice(0, 8).toUpperCase()}
                   </td>
-                  <td className="px-5 py-4 font-semibold">{row.store}</td>
-                  <td className="px-5 py-4 font-semibold">{row.amount}</td>
-                  <td className="px-5 py-4">
-                    <DemoBadge tone="blue">{row.method}</DemoBadge>
+                  <td className="px-5 py-4 font-semibold">{row.storeName}</td>
+                  <td className="px-5 py-4 font-semibold">
+                    {currency.format(row.totalUsd)}
                   </td>
                   <td className="px-5 py-4">
-                    <DemoBadge
+                    <StatusBadge tone="blue">
+                      {paymentMethodLabel(row.paymentMethod)}
+                    </StatusBadge>
+                  </td>
+                  <td className="px-5 py-4">
+                    <StatusBadge
                       tone={
-                        row.status === "approved"
+                        category(row.status) === "approved"
                           ? "green"
-                          : row.status === "review"
+                          : category(row.status) === "review"
                             ? "amber"
                             : "red"
                       }
                     >
                       {label(row.status)}
-                    </DemoBadge>
+                    </StatusBadge>
                   </td>
                   <td className="px-5 py-4 text-xs text-slate-500">
-                    {row.date}
+                    {formatOrderDate(row.createdAt)}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <button
@@ -928,9 +880,16 @@ function SalesViewPrimary({ language }: { language: Language }) {
               ))}
             </tbody>
           </table>
+          {rows.length === 0 ? (
+            <div className="p-12 text-center text-sm text-slate-500">
+              {es
+                ? "No hay ventas que coincidan con los filtros."
+                : "No sales match the filters."}
+            </div>
+          ) : null}
         </div>
       </div>
-      {selectedSale ? <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">{es ? "Detalle de venta" : "Sale detail"}</p><h3 className="mt-1 text-lg font-bold">{selectedSale.id}</h3></div><button type="button" onClick={() => setSelectedSale(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><dl className="mt-6 space-y-3 text-sm"><div className="flex justify-between"><dt className="text-slate-500">{es ? "Tienda" : "Store"}</dt><dd className="font-semibold">{selectedSale.store}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Monto" : "Amount"}</dt><dd className="font-semibold">{selectedSale.amount}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Método" : "Method"}</dt><dd className="font-semibold">{selectedSale.method}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Estado" : "Status"}</dt><dd className="font-semibold">{label(selectedSale.status)}</dd></div></dl></div></div> : null}
+      {selectedSale ? <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">{es ? "Detalle de venta" : "Sale detail"}</p><h3 className="mt-1 text-lg font-bold">{selectedSale.id}</h3></div><button type="button" onClick={() => setSelectedSale(null)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><dl className="mt-6 space-y-3 text-sm"><div className="flex justify-between"><dt className="text-slate-500">{es ? "Tienda" : "Store"}</dt><dd className="font-semibold">{selectedSale.storeName}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Monto" : "Amount"}</dt><dd className="font-semibold">{currency.format(selectedSale.totalUsd)}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Método" : "Method"}</dt><dd className="font-semibold">{paymentMethodLabel(selectedSale.paymentMethod)}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Estado" : "Status"}</dt><dd className="font-semibold">{label(selectedSale.status)}</dd></div><div className="flex justify-between"><dt className="text-slate-500">{es ? "Fecha" : "Date"}</dt><dd className="font-semibold">{formatOrderDate(selectedSale.createdAt)}</dd></div></dl></div></div> : null}
     </SectionFrame>
   );
 }
@@ -996,7 +955,7 @@ function UsersViewPrimary({ language, sourceUsers, onInviteUser }: { language: L
                 <th className="px-5 py-4">{es ? "Usuario" : "User"}</th>
                 <th className="px-5 py-4">{es ? "Rol" : "Role"}</th>
                 <th className="px-5 py-4">
-                  {es ? "Último acceso" : "Last access"}
+                  {es ? "Registro" : "Registered"}
                 </th>
                 <th className="px-5 py-4">{es ? "Estado" : "Status"}</th>
                 <th className="px-5 py-4 text-right">
@@ -1019,25 +978,29 @@ function UsersViewPrimary({ language, sourceUsers, onInviteUser }: { language: L
                     </div>
                   </td>
                   <td className="px-5 py-4">
-                    <DemoBadge
+                    <StatusBadge
                       tone={user.role === "Super Admin" ? "blue" : "slate"}
                     >
                       {user.role}
-                    </DemoBadge>
+                    </StatusBadge>
                   </td>
-                  <td className="px-5 py-4 text-slate-600">{user.last}</td>
+                  <td className="px-5 py-4 text-slate-600">
+                    {new Intl.DateTimeFormat(es ? "es-VE" : "en-US", {
+                      dateStyle: "medium",
+                    }).format(new Date(user.registeredAt))}
+                  </td>
                   <td className="px-5 py-4">
-                    <DemoBadge
-                      tone={user.status === "active" ? "green" : "amber"}
+                    <StatusBadge
+                      tone={user.status === "active" ? "green" : "slate"}
                     >
                       {user.status === "active"
                         ? es
                           ? "Activo"
                           : "Active"
                         : es
-                          ? "Pendiente"
-                          : "Pending"}
-                    </DemoBadge>
+                          ? "Suspendido"
+                          : "Suspended"}
+                    </StatusBadge>
                   </td>
                   <td className="relative px-5 py-4 text-right">
                     <div className="relative inline-block text-left">
@@ -1097,13 +1060,6 @@ function UsersViewPrimary({ language, sourceUsers, onInviteUser }: { language: L
               <input required name="email" type="email" placeholder={es ? "correo@ejemplo.com" : "email@example.com"} className="mt-5 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm" />
               <InviteSubmitButton language={language} />
             </form>
-            <button
-              type="button"
-              onClick={() => setInviteOpen(false)}
-              className="mt-4 w-full rounded-xl bg-slate-950 py-3 text-sm font-semibold text-white hover:bg-emerald-700"
-            >
-              {es ? "Enviar invitación" : "Send invitation"}
-            </button>
           </div>
         </div>
       )}
@@ -1111,171 +1067,50 @@ function UsersViewPrimary({ language, sourceUsers, onInviteUser }: { language: L
   );
 }
 
-/* function SalesView({ language }: { language: Language }) {
-  const es = language === "ES";
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
-  const rows = demoSales.filter((row) => (row.id + row.store + row.method).toLowerCase().includes(query.toLowerCase()) && (filter === "all" || row.status === filter));
-  const label = (status: DemoSale["status"]) => status === "approved" ? (es ? "OCR aprobado" : "OCR approved") : status === "review" ? (es ? "Revisión manual" : "Manual review") : (es ? "Rechazado" : "Rejected");
-  return <SectionFrame language={language} title={es ? "Ventas" : "Sales"} description={es ? "Auditoría global de transacciones y verificación de pagos." : "Global transaction audit and payment verification."} action={<button type="button" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="h-4 w-4" />{es ? "Exportar CSV" : "Export CSV"}</button>}><div className="grid gap-4 sm:grid-cols-2"><KpiCard label={es ? "Volumen total" : "Total volume"} value="$24,890.40" detail={es ? "Últimos 30 días" : "Last 30 days"} icon={TrendingUp} accent="bg-emerald-50 text-emerald-600" /><KpiCard label={es ? "Órdenes hoy" : "Orders today"} value="128" detail={es ? "+18.6% vs. ayer" : "+18.6% vs. yesterday"} icon={Activity} accent="bg-blue-50 text-blue-600" /></div><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40"><div className="flex gap-3 border-b border-slate-200 p-5"><label className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={es ? "Buscar por orden, tienda o método..." : "Search order, store or method..."} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-emerald-400" /></label><select value={filter} onChange={(event) => setFilter(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm"><option value="all">{es ? "Todos" : "All"}</option><option value="approved">{es ? "OCR aprobado" : "OCR approved"}</option><option value="review">{es ? "Revisión manual" : "Manual review"}</option><option value="rejected">{es ? "Rechazado" : "Rejected"}</option></select></div><div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-4">{es ? "Nº Orden" : "Order no."}</th><th className="px-5 py-4">{es ? "Tienda" : "Store"}</th><th className="px-5 py-4">{es ? "Monto" : "Amount"}</th><th className="px-5 py-4">{es ? "Método" : "Method"}</th><th className="px-5 py-4">{es ? "Verificación" : "Verification"}</th><th className="px-5 py-4">{es ? "Fecha" : "Date"}</th><th className="px-5 py-4 text-right">{es ? "Acciones" : "Actions"}</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-5 py-4 font-mono text-xs font-semibold">{row.id}</td><td className="px-5 py-4 font-semibold">{row.store}</td><td className="px-5 py-4 font-semibold">{row.amount}</td><td className="px-5 py-4"><DemoBadge tone="blue">{row.method}</DemoBadge></td><td className="px-5 py-4"><DemoBadge tone={row.status === "approved" ? "green" : row.status === "review" ? "amber" : "red"}>{label(row.status)}</DemoBadge></td><td className="px-5 py-4 text-xs text-slate-500">{row.date}</td><td className="px-5 py-4 text-right"><button type="button" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-100"><Eye className="h-4 w-4" /></button></td></tr>)}</tbody></table></div></div></SectionFrame>;
-}
-
-function UsersView({ language }: { language: Language }) {
-  const es = language === "ES";
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const rows = demoUsers.filter((user) => (user.name + user.email).toLowerCase().includes(query.toLowerCase()));
-  return <SectionFrame language={language} title={es ? "Usuarios" : "Users"} description={es ? "Propietarios de tiendas y administradores con acceso al sistema." : "Store owners and administrators with system access."} action={<button type="button" onClick={() => setInviteOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"><Mail className="h-4 w-4" />{es ? "Invitar usuario" : "Invite user"}</button>}><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40"><div className="border-b border-slate-200 p-5"><label className="relative block max-w-md"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={es ? "Buscar usuario o correo..." : "Search user or email..."} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-emerald-400" /></label></div><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-4">{es ? "Usuario" : "User"}</th><th className="px-5 py-4">{es ? "Rol" : "Role"}</th><th className="px-5 py-4">{es ? "Último acceso" : "Last access"}</th><th className="px-5 py-4">{es ? "Estado" : "Status"}</th><th className="px-5 py-4 text-right">{es ? "Acciones" : "Actions"}</th></tr></thead><tbody className="divide-y divide-slate-100">{rows.map((user) => <tr key={user.email} className="hover:bg-slate-50"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">{initials(user.name)}</div><div><p className="font-semibold">{user.name}</p><p className="text-xs text-slate-500">{user.email}</p></div></div></td><td className="px-5 py-4"><DemoBadge tone={user.role === "Super Admin" ? "blue" : "slate"}>{user.role}</DemoBadge></td><td className="px-5 py-4 text-slate-600">{user.last}</td><td className="px-5 py-4"><DemoBadge tone={user.status === "active" ? "green" : "amber"}>{user.status === "active" ? (es ? "Activo" : "Active") : (es ? "Pendiente" : "Pending")}</DemoBadge></td><td className="px-5 py-4 text-right"><button type="button" className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-100"><MoreHorizontal className="h-4 w-4" /></button></td></tr>)}</tbody></table></div></div>{inviteOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-center justify-between"><h3 className="text-lg font-bold">{es ? "Invitar usuario" : "Invite user"}</h3><button type="button" onClick={() => setInviteOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button></div><p className="mt-2 text-sm text-slate-500">{es ? "Enviaremos un enlace de acceso al correo indicado." : "We will send an access link to the provided email."}</p><input type="email" placeholder={es ? "correo@ejemplo.com" : "email@example.com"} className="mt-5 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm" /><button type="button" onClick={() => setInviteOpen(false)} className="mt-4 w-full rounded-xl bg-slate-950 py-3 text-sm font-semibold text-white hover:bg-emerald-700">{es ? "Enviar invitación" : "Send invitation"}</button></div></div>}</SectionFrame>;
-}
-
-*/
 
 function SettingsView({ language }: { language: Language }) {
   const es = language === "ES";
-  const [tab, setTab] = useState<"api" | "payments">("api");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [values, setValues] = useState({
-    openai: "",
-    wahaUrl: "https://waha.pagofacil.local",
-    wahaKey: "",
-    zelle: "pagofacil@zelle.com",
-    pagoMovil: "",
-    binance: "",
-  });
-  const update = (key: keyof typeof values, value: string) =>
-    setValues((current) => ({ ...current, [key]: value }));
-  const field = (
-    label: string,
-    key: keyof typeof values,
-    placeholder: string,
-    secret = false,
-  ) => (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-        {label}
-      </span>
-      <input
-        type={secret ? "password" : "text"}
-        value={values[key]}
-        onChange={(event) => update(key, event.target.value)}
-        placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-emerald-400 focus:bg-white"
-      />
-    </label>
-  );
-  const save = () => {
-    setSaving(true);
-    setSaved(false);
-    window.setTimeout(() => {
-      setSaving(false);
-      setSaved(true);
-    }, 900);
-  };
   return (
     <SectionFrame
       language={language}
       title={es ? "Configuración" : "Settings"}
       description={
         es
-          ? "Ajustes centrales para integraciones y recepción de pagos."
-          : "Core settings for integrations and payment collection."
+          ? "Estado de las integraciones y fuentes de configuración."
+          : "Integration status and configuration sources."
       }
     >
-      <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-        <div className="h-fit rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setTab("api")}
-            className={
-              "flex w-full rounded-xl px-3 py-3 text-left text-sm font-semibold " +
-              (tab === "api"
-                ? "bg-emerald-50 text-emerald-700"
-                : "text-slate-500 hover:bg-slate-50")
-            }
-          >
-            {es ? "Credenciales de API" : "API credentials"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("payments")}
-            className={
-              "flex w-full rounded-xl px-3 py-3 text-left text-sm font-semibold " +
-              (tab === "payments"
-                ? "bg-emerald-50 text-emerald-700"
-                : "text-slate-500 hover:bg-slate-50")
-            }
-          >
-            {es ? "Métodos de pago" : "Payment methods"}
-          </button>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/40 sm:p-7">
-          <div className="mb-6 flex justify-between">
-            <div>
-              <h3 className="text-lg font-bold">
-                {tab === "api"
-                  ? es
-                    ? "Credenciales de API"
-                    : "API credentials"
-                  : es
-                    ? "Métodos de pago globales"
-                    : "Global payment methods"}
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                {tab === "api"
-                  ? es
-                    ? "Conecta OpenAI y WAHA con el panel."
-                    : "Connect OpenAI and WAHA to the panel."
-                  : es
-                    ? "Configura los datos de cobro de las tiendas."
-                    : "Configure merchant payment details."}
-              </p>
+      <div className="grid gap-6 md:grid-cols-2">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/40">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-emerald-50 p-3 text-emerald-700">
+              <ShieldCheck className="h-5 w-5" />
             </div>
-            <ShieldCheck className="h-5 w-5 text-emerald-600" />
+            <h3 className="font-bold text-slate-950">
+              {es ? "Integraciones del servidor" : "Server integrations"}
+            </h3>
           </div>
-          {tab === "api" ? (
-            <div className="grid gap-5 md:grid-cols-2">
-              {field("OpenAI API Key", "openai", "sk-proj-••••••••", true)}
-              {field("WAHA URL", "wahaUrl", "https://waha.example.com")}
-              {field("WAHA API Key", "wahaKey", "waha_••••••••", true)}
+          <p className="mt-4 text-sm leading-6 text-slate-600">
+            {es
+              ? "Las credenciales de Supabase, OpenAI y WAHA se administran mediante variables de entorno del despliegue. El panel no expone ni simula secretos."
+              : "Supabase, OpenAI and WAHA credentials are managed through deployment environment variables. The panel does not expose or simulate secrets."}
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/40">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-blue-50 p-3 text-blue-700">
+              <Store className="h-5 w-5" />
             </div>
-          ) : (
-            <div className="grid gap-5 md:grid-cols-2">
-              {field("Zelle ID / correo", "zelle", "pagofacil@zelle.com")}
-              {field(
-                es ? "Datos de Pago Móvil" : "Pago Móvil details",
-                "pagoMovil",
-                es ? "Banco, teléfono y documento" : "Bank, phone and ID",
-              )}
-              {field("Binance Pay ID", "binance", "binance_merchant_id")}
-            </div>
-          )}
-          <div className="mt-8 flex flex-col justify-between gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center">
-            <p className="text-sm text-emerald-700">
-              {saved
-                ? es
-                  ? "Cambios guardados correctamente."
-                  : "Changes saved successfully."
-                : es
-                  ? "Los valores se almacenan de forma segura."
-                  : "Values are stored securely."}
-            </p>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={save}
-              className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-70"
-            >
-              {saving
-                ? es
-                  ? "Guardando..."
-                  : "Saving..."
-                : es
-                  ? "Guardar cambios"
-                  : "Save changes"}
-            </button>
+            <h3 className="font-bold text-slate-950">
+              {es ? "Métodos de pago" : "Payment methods"}
+            </h3>
           </div>
-        </div>
+          <p className="mt-4 text-sm leading-6 text-slate-600">
+            {es
+              ? "Los datos de cobro pertenecen a cada tienda y se gestionan desde su panel de comerciante. Esta vista no mantiene valores globales ficticios."
+              : "Payment details belong to each store and are managed from its merchant dashboard. This view does not keep fictional global values."}
+          </p>
+        </article>
       </div>
     </SectionFrame>
   );
@@ -1285,16 +1120,22 @@ function AdminSectionView({
   section,
   language,
   stores,
+  orders,
+  salesSummary,
   onCreateStore,
   onRenewSubscription,
+  onToggleStatus,
   users,
   onInviteUser,
 }: {
   section: string;
   language: Language;
   stores: StoreRow[];
+  orders: OrderRow[];
+  salesSummary: SalesSummary;
   onCreateStore: ServerAction;
   onRenewSubscription: ServerAction;
+  onToggleStatus: ServerAction;
   users: UserRow[];
   onInviteUser: ServerAction;
 }) {
@@ -1305,9 +1146,17 @@ function AdminSectionView({
         sourceStores={stores}
         onCreateStore={onCreateStore}
         onRenewSubscription={onRenewSubscription}
+        onToggleStatus={onToggleStatus}
       />
     );
-  if (section === "sales") return <SalesViewPrimary language={language} />;
+  if (section === "sales")
+    return (
+      <SalesViewPrimary
+        language={language}
+        orders={orders}
+        summary={salesSummary}
+      />
+    );
   if (section === "users") return <UsersViewPrimary language={language} sourceUsers={users} onInviteUser={onInviteUser} />;
   if (section === "settings") return <SettingsView language={language} />;
   const supportMessage =
@@ -1484,247 +1333,6 @@ function SectionShell({
   );
 }
 
-/* Legacy duplicate block retained below only as a migration note.
-type DemoStore = { id: string; name: string; owner: string; email: string; plan: string; status: "active" | "pending" | "inactive" };
-type DemoSale = { id: string; store: string; amount: string; method: string; status: "approved" | "review" | "rejected"; date: string };
-
-const demoStores: DemoStore[] = [
-  { id: "PF-0001", name: "Café Central", owner: "María González", email: "maria@cafecentral.ve", plan: "Enterprise", status: "active" },
-  { id: "PF-0002", name: "TechNova Store", owner: "Carlos Rivas", email: "carlos@technova.ve", plan: "Growth", status: "active" },
-  { id: "PF-0003", name: "Moda Caracas", owner: "Valentina Pérez", email: "valentina@modacaracas.ve", plan: "Starter", status: "pending" },
-  { id: "PF-0004", name: "Casa Verde", owner: "Andrés Molina", email: "andres@casaverde.ve", plan: "Growth", status: "inactive" },
-];
-const demoSales: DemoSale[] = [
-  { id: "#ORD-84291", store: "Café Central", amount: "USD 86.50 / Bs. 3.156,42", method: "Pago Móvil", status: "approved", date: "Hoy, 10:42 AM" },
-  { id: "#ORD-84290", store: "TechNova Store", amount: "USD 249.00 / Bs. 9.088,50", method: "Zelle", status: "review", date: "Hoy, 09:18 AM" },
-  { id: "#ORD-84289", store: "Bodega 24/7", amount: "USD 42.00 / Bs. 1.533,00", method: "Binance Pay", status: "approved", date: "Ayer, 06:52 PM" },
-  { id: "#ORD-84288", store: "Moda Caracas", amount: "USD 118.00 / Bs. 4.307,00", method: "Pago Móvil", status: "rejected", date: "Ayer, 04:31 PM" },
-];
-const demoUsers = [
-  { name: "Bruno Superadmin", email: "bruno@pagofacil.com", role: "Super Admin", last: "Hace 4 min", status: "active" },
-  { name: "María González", email: "maria@cafecentral.ve", role: "Lojista", last: "Hoy, 10:44 AM", status: "active" },
-  { name: "Carlos Rivas", email: "carlos@technova.ve", role: "Lojista", last: "Ayer, 06:21 PM", status: "active" },
-  { name: "Valentina Pérez", email: "valentina@modacaracas.ve", role: "Lojista", last: "Nunca", status: "pending" },
-];
-
-function DemoBadge({ children, tone }: { children: React.ReactNode; tone: "green" | "amber" | "slate" | "red" | "blue" }) {
-  const styles = { green: "bg-emerald-50 text-emerald-700", amber: "bg-amber-50 text-amber-700", slate: "bg-slate-100 text-slate-600", red: "bg-rose-50 text-rose-700", blue: "bg-blue-50 text-blue-700" };
-  return <span className={"inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold " + styles[tone]}>{children}</span>;
-}
-
-function SectionFrame({ title, description, language, action, children }: { title: string; description: string; language: Language; action?: React.ReactNode; children: React.ReactNode }) {
-  return <main className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-8"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">{language === "ES" ? "Gestión" : "Management"}</p><h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">{title}</h2><p className="mt-2 text-sm text-slate-500">{description}</p></div>{action}</div>{children}</main>;
-}
-
-function StoresView({ language, sourceStores }: { language: Language; sourceStores: StoreRow[] }) {
-  const es = language === "ES";
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
-  const rows: DemoStore[] = sourceStores.length ? sourceStores.map((item) => ({ id: item.id.slice(0, 8).toUpperCase(), name: item.name, owner: item.email.split("@")[0], email: item.email, plan: "Growth", status: item.status === "suspended" ? "inactive" : item.status })) : demoStores;
-  const filtered = rows.filter((row) => (row.name + row.owner + row.email).toLowerCase().includes(query.toLowerCase()) && (filter === "all" || row.status === filter));
-  return <SectionFrame language={language} title={es ? "Tiendas" : "Stores"} description={es ? "Administra comercios, planes y accesos desde un solo lugar." : "Manage merchants, plans and access from one place."} action={<button type="button" className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"><Plus className="h-4 w-4" />{es ? "Nueva tienda" : "New store"}</button>}><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/40"><div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row"><label className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={es ? "Buscar tienda, propietario o correo..." : "Search store, owner or email..."} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-emerald-400 focus:bg-white" /></label><select value={filter} onChange={(event) => setFilter(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm"><option value="all">{es ? "Todos los estados" : "All statuses"}</option><option value="active">{es ? "Activas" : "Active"}</option><option value="pending">{es ? "Pendientes" : "Pending"}</option><option value="inactive">{es ? "Inactivas" : "Inactive"}</option></select><button type="button" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"><Filter className="h-4 w-4" />{es ? "Filtros" : "Filters"}</button></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-4">ID</th><th className="px-5 py-4">{es ? "Nombre de la tienda" : "Store name"}</th><th className="px-5 py-4">{es ? "Propietario" : "Owner"}</th><th className="px-5 py-4">Plan</th><th className="px-5 py-4">{es ? "Estado" : "Status"}</th><th className="px-5 py-4 text-right">{es ? "Acciones" : "Actions"}</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-5 py-4 font-mono text-xs text-slate-500">{row.id}</td><td className="px-5 py-4"><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-xs font-bold text-emerald-700">{initials(row.name)}</div><div><p className="font-semibold text-slate-800">{row.name}</p><p className="text-xs text-slate-500">{row.email}</p></div></div></td><td className="px-5 py-4"><p className="font-medium text-slate-700">{row.owner}</p><p className="text-xs text-slate-400">{row.email}</p></td><td className="px-5 py-4"><DemoBadge tone={row.plan === "Enterprise" ? "blue" : row.plan === "Growth" ? "green" : "slate"}>{row.plan}</DemoBadge></td><td className="px-5 py-4"><DemoBadge tone={row.status === "active" ? "green" : row.status === "pending" ? "amber" : "slate"}>{row.status === "active" ? (es ? "Activa" : "Active") : row.status === "pending" ? (es ? "Pendiente" : "Pending") : (es ? "Inactiva" : "Inactive")}</DemoBadge></td><td className="px-5 py-4 text-right"><button type="button" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-200 hover:bg-emerald-50">{row.status === "active" ? (es ? "Desactivar" : "Deactivate") : (es ? "Activar" : "Activate")}</button></td></tr>)}</tbody></table></div><div className="border-t border-slate-200 px-5 py-4 text-xs text-slate-500">{es ? "Mostrando" : "Showing"} <b>{filtered.length}</b> {es ? "de" : "of"} <b>{rows.length}</b> {es ? "tiendas" : "stores"}</div></div></SectionFrame>;
-}
-
-function SettingsView({ language }: { language: Language }) {
-  const es = language === "ES";
-  const [tab, setTab] = useState<"api" | "payments">("api");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [values, setValues] = useState({ openai: "", wahaUrl: "https://waha.pagofacil.local", wahaKey: "", zelle: "pagofacil@zelle.com", pagoMovil: "", binance: "" });
-  const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
-  const field = (label: string, key: keyof typeof values, placeholder: string, secret = false) => <label className="block"><span className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</span><input type={secret ? "password" : "text"} value={values[key]} onChange={(event) => update(key, event.target.value)} placeholder={placeholder} className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-emerald-400 focus:bg-white" /></label>;
-  const save = () => { setSaving(true); setSaved(false); window.setTimeout(() => { setSaving(false); setSaved(true); }, 900); };
-  return <SectionFrame language={language} title={es ? "Configuración" : "Settings"} description={es ? "Ajustes centrales para integraciones y recepción de pagos." : "Core settings for integrations and payment collection."}><div className="grid gap-6 lg:grid-cols-[220px_1fr]"><div className="h-fit rounded-2xl border border-slate-200 bg-white p-2 shadow-sm"><button type="button" onClick={() => setTab("api")} className={"flex w-full rounded-xl px-3 py-3 text-left text-sm font-semibold " + (tab === "api" ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-50")}>{es ? "Credenciales de API" : "API credentials"}</button><button type="button" onClick={() => setTab("payments")} className={"flex w-full rounded-xl px-3 py-3 text-left text-sm font-semibold " + (tab === "payments" ? "bg-emerald-50 text-emerald-700" : "text-slate-500 hover:bg-slate-50")}>{es ? "Métodos de pago" : "Payment methods"}</button></div><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/40 sm:p-7"><div className="mb-6 flex justify-between"><div><h3 className="text-lg font-bold">{tab === "api" ? (es ? "Credenciales de API" : "API credentials") : (es ? "Métodos de pago globales" : "Global payment methods")}</h3><p className="mt-1 text-sm text-slate-500">{tab === "api" ? (es ? "Conecta OpenAI y WAHA con el panel." : "Connect OpenAI and WAHA to the panel.") : (es ? "Configura los datos de cobro de las tiendas." : "Configure merchant payment details.")}</p></div><ShieldCheck className="h-5 w-5 text-emerald-600" /></div>{tab === "api" ? <div className="grid gap-5 md:grid-cols-2">{field("OpenAI API Key", "openai", "sk-proj-••••••••", true)}{field("WAHA URL", "wahaUrl", "https://waha.example.com")}{field("WAHA API Key", "wahaKey", "waha_••••••••", true)}</div> : <div className="grid gap-5 md:grid-cols-2">{field("Zelle ID / correo", "zelle", "pagofacil@zelle.com")}{field(es ? "Datos de Pago Móvil" : "Pago Móvil details", "pagoMovil", es ? "Banco, teléfono y documento" : "Bank, phone and ID")}{field("Binance Pay ID", "binance", "binance_merchant_id")}</div>}<div className="mt-8 flex flex-col justify-between gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center"><p className="text-sm text-emerald-700">{saved ? (es ? "Cambios guardados correctamente." : "Changes saved successfully.") : (es ? "Los valores se almacenan de forma segura." : "Values are stored securely.")}</p><button type="button" disabled={saving} onClick={save} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-70">{saving ? (es ? "Guardando..." : "Saving...") : (es ? "Guardar cambios" : "Save changes")}</button></div></div></div></SectionFrame>;
-}
-
-function AdminSectionView({ section, language, stores }: { section: string; language: Language; stores: StoreRow[] }) {
-  if (section === "stores") return <StoresView language={language} sourceStores={stores} />;
-  if (section === "sales") return <SalesView language={language} />;
-  if (section === "users") return <UsersView language={language} />;
-  if (section === "settings") return <SettingsView language={language} />;
-  return null;
-}
-*/
-
-function SectionPlaceholder({
-  section,
-  language,
-  collapsed,
-  onToggleCollapsed,
-  onNavigate,
-}: {
-  section: string;
-  language: Language;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  onNavigate: (key: string) => void;
-}) {
-  const t = copy[language];
-  const sectionCopy: Record<
-    string,
-    {
-      title: string;
-      description: string;
-      icon: ComponentType<{ className?: string }>;
-    }
-  > = {
-    stores: {
-      title: language === "ES" ? "Tiendas" : "Stores",
-      description:
-        language === "ES"
-          ? "Administra tus comercios, accesos y estados desde este espacio."
-          : "Manage your merchants, access and statuses from this workspace.",
-      icon: Store,
-    },
-    sales: {
-      title: language === "ES" ? "Ventas" : "Sales",
-      description:
-        language === "ES"
-          ? "Consulta el rendimiento y el movimiento de tus ventas."
-          : "Review sales performance and activity.",
-      icon: BarChart3,
-    },
-    users: {
-      title: language === "ES" ? "Usuarios" : "Users",
-      description:
-        language === "ES"
-          ? "Gestiona los usuarios y permisos de la plataforma."
-          : "Manage platform users and permissions.",
-      icon: Users,
-    },
-    settings: {
-      title: t.settings,
-      description:
-        language === "ES"
-          ? "Configura las preferencias generales de PagoFácil."
-          : "Configure PagoFácil general preferences.",
-      icon: Settings,
-    },
-    help: {
-      title: t.help,
-      description:
-        language === "ES"
-          ? "Encuentra respuestas y recursos para operar tu cuenta."
-          : "Find answers and resources to operate your account.",
-      icon: CircleHelp,
-    },
-  };
-  const current = sectionCopy[section] ?? sectionCopy.stores;
-  const Icon = current.icon;
-  return (
-    <div className="pf-corporate-background min-h-screen text-slate-950">
-      <aside
-        className={`fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-slate-800 bg-slate-950 px-4 py-5 text-slate-300 shadow-2xl shadow-slate-950/20 ${collapsed ? "lg:w-24" : ""}`}
-      >
-        <div
-          className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}
-        >
-          <div className={collapsed ? "hidden" : "block"}>
-            <BrandLogo
-              className="h-20 w-56 object-contain brightness-0 invert"
-              priority
-            />
-          </div>
-          {collapsed && (
-            <span className="text-xl font-black text-white">PF</span>
-          )}
-        </div>
-        <nav className="mt-10 space-y-1" aria-label={t.principal}>
-          {navItems.map(({ key, label, icon: NavIcon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onNavigate(key)}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition ${section === key ? "bg-emerald-400 font-semibold text-emerald-950" : "text-slate-400 hover:bg-slate-800 hover:text-white"} ${collapsed ? "justify-center" : ""}`}
-              title={collapsed ? label[language] : undefined}
-            >
-              <NavIcon className="h-[18px] w-[18px] shrink-0" />
-              <span className={collapsed ? "hidden" : ""}>
-                {label[language]}
-              </span>
-            </button>
-          ))}
-        </nav>
-        <p
-          className={`mb-3 mt-8 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-600 ${collapsed ? "hidden" : ""}`}
-        >
-          {t.system}
-        </p>
-        <div className="space-y-1">
-          <button
-            type="button"
-            onClick={() => onNavigate("settings")}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium ${section === "settings" ? "bg-emerald-400 text-emerald-950" : "text-slate-400 hover:bg-slate-800 hover:text-white"} ${collapsed ? "justify-center" : ""}`}
-          >
-            <Settings className="h-[18px] w-[18px]" />
-            <span className={collapsed ? "hidden" : ""}>{t.settings}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate("help")}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium ${section === "help" ? "bg-emerald-400 text-emerald-950" : "text-slate-400 hover:bg-slate-800 hover:text-white"} ${collapsed ? "justify-center" : ""}`}
-          >
-            <CircleHelp className="h-[18px] w-[18px]" />
-            <span className={collapsed ? "hidden" : ""}>{t.help}</span>
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          className="mt-auto hidden items-center justify-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-xs font-semibold text-slate-400 hover:bg-slate-800 hover:text-white lg:flex"
-        >
-          <ChevronRight
-            className={`h-4 w-4 ${collapsed ? "rotate-180" : ""}`}
-          />
-          <span className={collapsed ? "hidden" : ""}>{t.collapse}</span>
-        </button>
-      </aside>
-      <main
-        className={`${collapsed ? "lg:pl-24" : "lg:pl-72"} min-h-screen p-4 transition-[padding] duration-300 sm:p-8`}
-      >
-        <header className="flex h-16 items-center justify-between border-b border-slate-200/80 pb-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600">
-              {t.adminPanel}
-            </p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">
-              {current.title}
-            </h1>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigate("overview")}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700"
-          >
-            {t.overview}
-          </button>
-        </header>
-        <section className="mx-auto flex max-w-4xl items-center justify-center py-24">
-          <div className="w-full rounded-3xl border border-slate-200/80 bg-white p-8 text-center shadow-xl shadow-slate-200/40 sm:p-14">
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-100 text-emerald-700">
-              <Icon className="h-8 w-8" />
-            </div>
-            <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">
-              {language === "ES" ? "Sección" : "Section"}
-            </p>
-            <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
-              {current.title}
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-500">
-              {current.description}
-            </p>
-            <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-600">
-              <Clock3 className="h-4 w-4" />
-              {language === "ES"
-                ? "Vista base lista para conectar"
-                : "Base view ready to connect"}
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
-  );
-}
 
 function NewStoreModal({
   open,
@@ -1899,6 +1507,8 @@ export default function AdminDashboard({
   stores,
   users,
   metrics,
+  orders,
+  salesSummary,
   error,
   onToggleStatus,
   onCreateStore,
@@ -1962,24 +1572,15 @@ export default function AdminDashboard({
           section={activeNav}
           language={language}
           stores={stores}
+          orders={orders}
+          salesSummary={salesSummary}
           onCreateStore={onCreateStore}
           onRenewSubscription={onRenewSubscription}
+          onToggleStatus={onToggleStatus}
           users={users}
           onInviteUser={onInviteUser}
         />
       </SectionShell>
-    );
-  }
-
-  if (activeNav !== "overview") {
-    return (
-      <SectionPlaceholder
-        section={activeNav}
-        language={language}
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((value) => !value)}
-        onNavigate={setActiveNav}
-      />
     );
   }
 
@@ -2049,9 +1650,9 @@ export default function AdminDashboard({
                 <span className={collapsed ? "hidden" : ""}>
                   {label[language]}
                 </span>
-                {key === "sales" && !collapsed && (
+                {key === "sales" && !collapsed && metrics.pendingOrders > 0 && (
                   <span className="ml-auto rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                    New
+                    {metrics.pendingOrders}
                   </span>
                 )}
               </button>
@@ -2195,7 +1796,9 @@ export default function AdminDashboard({
                 className="relative rounded-xl p-2.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950"
               >
                 <Bell className="h-5 w-5" />
-                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+                {metrics.pendingOrders > 0 ? (
+                  <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-amber-500 ring-2 ring-white" />
+                ) : null}
               </button>
               {notificationsOpen && (
                 <div className="absolute right-0 top-12 z-30 w-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl shadow-slate-900/10">
@@ -2204,7 +1807,13 @@ export default function AdminDashboard({
                   </p>
                   <div className="mt-3 flex gap-3 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800">
                     <CheckCircle2 className="h-4 w-4 shrink-0" />
-                    <span>{t.systemNormal}</span>
+                    <span>
+                      {metrics.pendingOrders > 0
+                        ? language === "ES"
+                          ? `${metrics.pendingOrders} órdenes requieren revisión.`
+                          : `${metrics.pendingOrders} orders require review.`
+                        : t.systemNormal}
+                    </span>
                   </div>
                 </div>
               )}
@@ -2420,17 +2029,12 @@ export default function AdminDashboard({
                           </span>
                         </td>
                         <td className="relative px-6 py-4 text-right">
-                          {store.status === "pending" ? (
-                            <span className="text-xs font-medium text-slate-400">
-                              {t.waitingProfile}
-                            </span>
-                          ) : (
-                            <div className="inline-flex items-center gap-2">
+                          <div className="inline-flex items-center gap-2">
                               <form action={onToggleStatus}>
                                 <input
                                   type="hidden"
-                                  name="profile_id"
-                                  value={store.ownerId}
+                                  name="store_id"
+                                  value={store.id}
                                 />
                                 <input
                                   type="hidden"
@@ -2486,7 +2090,6 @@ export default function AdminDashboard({
                                 )}
                               </div>
                             </div>
-                          )}
                         </td>
                       </tr>
                     );

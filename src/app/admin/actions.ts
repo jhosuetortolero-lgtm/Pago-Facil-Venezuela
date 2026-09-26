@@ -7,6 +7,20 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getExchangeRates } from "@/lib/exchange-rate";
 
+const emailSchema = z.string().email();
+const zelleContactSchema = z
+  .string()
+  .trim()
+  .max(120)
+  .refine((value) => {
+    if (!value || emailSchema.safeParse(value).success) return true;
+
+    const digitCount = value.replace(/\D/g, "").length;
+    return (
+      /^\+?[\d\s().-]+$/.test(value) && digitCount >= 7 && digitCount <= 15
+    );
+  }, "Ingresa un correo o teléfono válido para Zelle.");
+
 const storeSchema = z.object({
   name: z.string().trim().min(2).max(120),
   slug: z
@@ -16,7 +30,9 @@ const storeSchema = z.object({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
     .optional()
     .or(z.literal("")),
-  zelle_email: z.union([z.literal(""), z.string().email()]),
+  // The existing column name is kept for database compatibility, but Zelle
+  // accepts either an email address or a phone number as the recipient.
+  zelle_email: zelleContactSchema,
   pago_movil_phone: z.string().trim().max(30),
   pago_movil_bank: z.string().trim().max(80),
   pago_movil_id: z.string().trim().max(40),
@@ -128,9 +144,14 @@ export async function updateStoreConfig(formData: FormData) {
   const { data: updatedStore, error } = await supabase
     .from("stores")
     .update({
-      ...parsed.data,
+      name: parsed.data.name,
+      zelle_email: parsed.data.zelle_email || null,
+      pago_movil_phone: parsed.data.pago_movil_phone || null,
+      pago_movil_bank: parsed.data.pago_movil_bank || null,
+      pago_movil_id: parsed.data.pago_movil_id || null,
       binance_pay_id: parsed.data.binance_pay_id || null,
       slug,
+      exchange_rate_mode: parsed.data.exchange_rate_mode,
       manual_exchange_rate:
         parsed.data.exchange_rate_mode === "manual"
           ? parsed.data.manual_exchange_rate
@@ -146,6 +167,8 @@ export async function updateStoreConfig(formData: FormData) {
     );
   revalidatePath("/admin/dashboard", "page");
   revalidatePath("/admin/products", "page");
+  revalidatePath(`/${store.slug}`, "page");
+  if (slug !== store.slug) revalidatePath(`/${slug}`, "page");
   redirect("/admin/dashboard?view=summary&saved=1");
 }
 
@@ -155,8 +178,7 @@ export async function refreshAutomaticRate() {
   const rates = await getExchangeRates();
   if (rates.official.value === null)
     redirect("/admin/dashboard?error=No%20se%20pudo%20obtener%20la%20tasa%20BCV%20real.");
-  // Mock da consulta diária à taxa BCV; será substituído por Cron/API na próxima etapa.
-  await supabase
+  const { error } = await supabase
     .from("stores")
     .update({
       exchange_rate_mode: "automatic",
@@ -164,7 +186,10 @@ export async function refreshAutomaticRate() {
       exchange_rate_updated_at: new Date().toISOString(),
     })
     .eq("id", store.id);
+  if (error)
+    redirect("/admin/dashboard?error=No%20se%20pudo%20guardar%20la%20tasa%20BCV.");
   revalidatePath("/admin/dashboard", "page");
+  revalidatePath(`/${store.slug}`, "page");
   redirect("/admin/dashboard?section=settings#configuracion");
 }
 
@@ -226,28 +251,14 @@ export async function updateProduct(formData: FormData) {
   redirect("/admin/products?updated=1");
 }
 
-async function notifyCustomer(order: { customer_phone: string | null; total_usd: number; id: string }, approved: boolean) {
-  const baseUrl = process.env.WAHA_URL?.replace(/\/$/, "");
-  const apiKey = process.env.WAHA_API_KEY;
-  const session = process.env.WAHA_SESSION ?? "default";
-  const phone = order.customer_phone?.replace(/[^0-9]/g, "");
-  if (!baseUrl || !apiKey || !phone) return;
-  await fetch(`${baseUrl}/api/sendText`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-    body: JSON.stringify({ session, chatId: `${phone}@c.us`, text: approved ? `✅ Pago confirmado. Pedido ${order.id} por $${Number(order.total_usd).toFixed(2)} USD aprobado.` : `⚠️ El comprobante del pedido ${order.id} no pudo ser aprobado. Contacta a la tienda para recibir ayuda.` }),
-  });
-}
-
 async function updateOrderStatus(formData: FormData, status: "verified" | "cancelled", approved: boolean) {
   const { supabase, store } = await ownedStore();
   const parsed = orderActionSchema.safeParse(Object.fromEntries(formData));
   if (!store || !parsed.success) redirect("/admin/orders?error=Pedido%20inv%C3%A1lido.");
-  const { data: order } = await supabase.from("orders").select("id, customer_phone, total_usd").eq("id", parsed.data.order_id).eq("store_id", store.id).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id").eq("id", parsed.data.order_id).eq("store_id", store.id).maybeSingle();
   if (!order) redirect("/admin/orders?error=No%20se%20encontr%C3%B3%20el%20pedido.");
   const { error } = await supabase.from("orders").update({ status }).eq("id", order.id).eq("store_id", store.id);
   if (error) redirect("/admin/orders?error=No%20se%20pudo%20actualizar%20el%20pedido.");
-  try { await notifyCustomer(order, approved); } catch { /* El estado queda actualizado aunque WAHA no esté disponible. */ }
   revalidatePath("/admin/orders");
   revalidatePath("/admin/dashboard");
   redirect(`/admin/orders?updated=${approved ? "approved" : "rejected"}`);

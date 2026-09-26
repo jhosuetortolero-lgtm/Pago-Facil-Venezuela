@@ -6,7 +6,10 @@ import { Activity, AlertTriangle, Boxes, Clock3, DollarSign, MessageCircle } fro
 import { MerchantSubmitButton } from "@/components/merchant-submit-button";
 import { ExchangeRateWidget } from "@/components/exchange-rate-widget";
 import { RenewalModalTrigger } from "@/components/renewal-modal-trigger";
-import { getExchangeRates } from "@/lib/exchange-rate";
+import {
+  getExchangeRates,
+  resolveStoreExchangeRate,
+} from "@/lib/exchange-rate";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +25,16 @@ export default async function DashboardPage({
   const { data: store } = await supabase
     .from("stores")
     .select(
-      "id, name, slug, onboarding_status, zelle_email, pago_movil_phone, pago_movil_bank, pago_movil_id, binance_pay_id, exchange_rate_mode, manual_exchange_rate, current_exchange_rate",
+      "id, name, slug, onboarding_status, zelle_email, pago_movil_phone, pago_movil_bank, pago_movil_id, binance_pay_id, exchange_rate_mode, manual_exchange_rate, current_exchange_rate, exchange_rate_updated_at",
     )
     .eq("owner_id", user!.id)
     .maybeSingle();
   const params = await searchParams;
   const exchangeRates = await getExchangeRates();
-  const currentBcvRate = exchangeRates.official.value ?? store?.current_exchange_rate ?? null;
+  const storeRate = store
+    ? resolveStoreExchangeRate(store, exchangeRates)
+    : null;
+  const currentStoreRate = storeRate?.value ?? null;
   const isActive = store?.onboarding_status === "active";
   const [{ count: productCount }, { data: orderRows }] = store
     ? await Promise.all([
@@ -151,7 +157,7 @@ export default async function DashboardPage({
                 </Link>
                 <Link href="?section=settings#configuracion" className="rounded-xl border p-5 transition hover:border-emerald-400 hover:bg-emerald-50">
                   <p className="font-semibold">Métodos de pago</p>
-                  <p className="mt-1 text-sm text-slate-500">Editar Zelle y Pago Móvil.</p>
+                  <p className="mt-1 text-sm text-slate-500">Editar Zelle, Pago Móvil y Binance Pay.</p>
                 </Link>
                 <Link href={`/${store.slug}`} target="_blank" className="rounded-xl border p-5 transition hover:border-emerald-400 hover:bg-emerald-50">
                   <p className="font-semibold">Ver vitrina pública</p>
@@ -222,11 +228,11 @@ export default async function DashboardPage({
               </span>
             </label>
             <label className="text-sm font-medium">
-              Correo Zelle
+              Zelle (correo o teléfono)
               <input
                 name="zelle_email"
                 defaultValue={store.zelle_email ?? ""}
-                placeholder="pagos@negocio.com"
+                placeholder="pagos@negocio.com o +1 305 555 0123"
                 className="mt-1 h-11 w-full rounded-lg border px-3"
               />
             </label>
@@ -267,12 +273,17 @@ export default async function DashboardPage({
               />
             </label>
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5 md:col-span-2">
-              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><p className="text-sm font-bold text-emerald-950">Tasa de cambio</p><p className="mt-1 text-xs text-emerald-900/70">Usa la tasa BCV real para convertir tus precios en bolívares.</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-emerald-800">{currentBcvRate ? `Bs. ${Number(currentBcvRate).toFixed(2)}` : "Sin actualizar"}</span></div>
+              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><p className="text-sm font-bold text-emerald-950">Tasa de cambio de la tienda</p><p className="mt-1 text-xs text-emerald-900/70">Esta es la cotización que verá el cliente para pagar en bolívares.</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-emerald-800">{currentStoreRate ? `Bs. ${Number(currentStoreRate).toLocaleString("es-VE", { minimumFractionDigits: 4, maximumFractionDigits: 6 })}` : "Sin actualizar"}</span></div>
               <ExchangeRateToggle
                 automatic={store.exchange_rate_mode === "automatic"}
+                manualRate={store.manual_exchange_rate}
               />
               <p className="mt-2 text-xs text-slate-500">
-                Tasa BCV real de hoy: {currentBcvRate ? `Bs. ${Number(currentBcvRate).toFixed(2)}` : "sin actualizar"}. El widget del panel utiliza la misma fuente.
+                {storeRate?.source === "manual"
+                  ? "Se aplicará la tasa manual configurada por la tienda."
+                  : storeRate?.source === "stored_bcv"
+                    ? "Se está usando temporalmente la última tasa BCV sincronizada."
+                    : "Se aplicará la tasa oficial BCV mostrada en el panel."}
               </p>
             </div>
             <div className="flex flex-wrap gap-3 md:col-span-2">

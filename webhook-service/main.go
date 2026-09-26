@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,21 +28,21 @@ const (
 )
 
 var (
-	phonePattern       = regexp.MustCompile(`^[0-9]{7,15}$`)
-	uuidPattern        = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
-	errStoreNotFound   = errors.New("store not found")
-	errStorePhoneEmpty = errors.New("store WhatsApp phone is missing or invalid")
+	phonePattern     = regexp.MustCompile(`^[0-9]{7,15}$`)
+	uuidPattern      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+	errStoreNotFound = errors.New("store not found")
 )
 
 type config struct {
-	port               string
-	webhookSecret      string
-	supabaseURL        string
-	supabaseServiceKey string
-	wahaURL            string
-	wahaAPIKey         string
-	wahaSession        string
-	defaultCountryCode string
+	port                 string
+	webhookSecret        string
+	supabaseURL          string
+	supabaseServiceKey   string
+	wahaURL              string
+	wahaAPIKey           string
+	wahaSession          string
+	defaultCountryCode   string
+	defaultMerchantPhone string
 }
 
 type orderRecord struct {
@@ -68,11 +69,15 @@ type webhookPayload struct {
 }
 
 type storeRecord struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	PagoMovilPhone   string `json:"pago_movil_phone"`
-	NotificationLang string `json:"-"`
-	Currency         string `json:"-"`
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	WhatsAppPhone       string `json:"whatsapp_phone"`
+	Phone               string `json:"phone"`
+	PagoMovilPhone      string `json:"pago_movil_phone"`
+	MerchantPhone       string `json:"-"`
+	MerchantPhoneSource string `json:"-"`
+	NotificationLang    string `json:"-"`
+	Currency            string `json:"-"`
 }
 
 type wahaMessage struct {
@@ -82,14 +87,15 @@ type wahaMessage struct {
 }
 
 type server struct {
-	webhookSecret      string
-	supabaseURL        string
-	supabaseServiceKey string
-	wahaURL            string
-	wahaAPIKey         string
-	wahaSession        string
-	defaultCountryCode string
-	httpClient         *http.Client
+	webhookSecret        string
+	supabaseURL          string
+	supabaseServiceKey   string
+	wahaURL              string
+	wahaAPIKey           string
+	wahaSession          string
+	defaultCountryCode   string
+	defaultMerchantPhone string
+	httpClient           *http.Client
 }
 
 func main() {
@@ -104,14 +110,15 @@ func main() {
 
 	gin.SetMode(envOr("GIN_MODE", gin.ReleaseMode))
 	s := server{
-		webhookSecret:      cfg.webhookSecret,
-		supabaseURL:        cfg.supabaseURL,
-		supabaseServiceKey: cfg.supabaseServiceKey,
-		wahaURL:            cfg.wahaURL,
-		wahaAPIKey:         cfg.wahaAPIKey,
-		wahaSession:        cfg.wahaSession,
-		defaultCountryCode: cfg.defaultCountryCode,
-		httpClient:         &http.Client{Timeout: 10 * time.Second},
+		webhookSecret:        cfg.webhookSecret,
+		supabaseURL:          cfg.supabaseURL,
+		supabaseServiceKey:   cfg.supabaseServiceKey,
+		wahaURL:              cfg.wahaURL,
+		wahaAPIKey:           cfg.wahaAPIKey,
+		wahaSession:          cfg.wahaSession,
+		defaultCountryCode:   cfg.defaultCountryCode,
+		defaultMerchantPhone: cfg.defaultMerchantPhone,
+		httpClient:           &http.Client{Timeout: 10 * time.Second},
 	}
 
 	httpServer := &http.Server{
@@ -132,14 +139,15 @@ func main() {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		port:               envOr("PORT", "8080"),
-		webhookSecret:      strings.TrimSpace(os.Getenv("SUPABASE_WEBHOOK_SECRET")),
-		supabaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("SUPABASE_URL")), "/"),
-		supabaseServiceKey: strings.TrimSpace(os.Getenv("SUPABASE_SECRET_KEY")),
-		wahaURL:            strings.TrimRight(strings.TrimSpace(os.Getenv("WAHA_URL")), "/"),
-		wahaAPIKey:         strings.TrimSpace(os.Getenv("WAHA_API_KEY")),
-		wahaSession:        envOr("WAHA_SESSION", "default"),
-		defaultCountryCode: envOr("DEFAULT_COUNTRY_CODE", "58"),
+		port:                 envOr("PORT", "8080"),
+		webhookSecret:        strings.TrimSpace(os.Getenv("SUPABASE_WEBHOOK_SECRET")),
+		supabaseURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("SUPABASE_URL")), "/"),
+		supabaseServiceKey:   strings.TrimSpace(os.Getenv("SUPABASE_SECRET_KEY")),
+		wahaURL:              strings.TrimRight(strings.TrimSpace(os.Getenv("WAHA_URL")), "/"),
+		wahaAPIKey:           strings.TrimSpace(os.Getenv("WAHA_API_KEY")),
+		wahaSession:          envOr("WAHA_SESSION", "default"),
+		defaultCountryCode:   envOr("DEFAULT_COUNTRY_CODE", "58"),
+		defaultMerchantPhone: strings.TrimSpace(os.Getenv("DEFAULT_MERCHANT_PHONE")),
 	}
 	if cfg.supabaseServiceKey == "" {
 		cfg.supabaseServiceKey = strings.TrimSpace(os.Getenv("SUPABASE_SERVICE_ROLE_KEY"))
@@ -175,6 +183,9 @@ func loadConfig() (config, error) {
 	}
 	if !regexp.MustCompile(`^[1-9][0-9]{0,2}$`).MatchString(cfg.defaultCountryCode) {
 		return config{}, errors.New("DEFAULT_COUNTRY_CODE debe contener entre 1 y 3 dígitos y no comenzar por cero")
+	}
+	if cfg.defaultMerchantPhone != "" && normalizePhoneWithCountry(cfg.defaultMerchantPhone, cfg.defaultCountryCode) == "" {
+		return config{}, errors.New("DEFAULT_MERCHANT_PHONE debe ser un teléfono válido")
 	}
 	return cfg, nil
 }
@@ -221,7 +232,7 @@ func (s server) handleOrderWebhook(c *gin.Context) {
 	store, err := s.resolveStore(c.Request.Context(), payload.Record.StoreID)
 	if err != nil {
 		log.Printf("no se pudo enriquecer el pedido %s (store %s): %v", payload.Record.ID, payload.Record.StoreID, err)
-		if errors.Is(err, errStoreNotFound) || errors.Is(err, errStorePhoneEmpty) {
+		if errors.Is(err, errStoreNotFound) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "store notification settings are incomplete"})
 			return
 		}
@@ -229,15 +240,18 @@ func (s server) handleOrderWebhook(c *gin.Context) {
 		return
 	}
 
-	merchantPhone := normalizePhoneWithCountry(store.PagoMovilPhone, s.defaultCountryCode)
 	customerPhone := normalizePhoneWithCountry(payload.Record.CustomerPhone, s.defaultCountryCode)
 	merchantMessage := formatMerchantMessage(payload, store, s.defaultCountryCode)
 	customerMessage := formatCustomerMessage(payload, store)
 
-	if err := s.sendWAHAMessage(c.Request.Context(), merchantPhone, merchantMessage); err != nil {
-		log.Printf("falló la notificación al comercio para el pedido %s: %v", payload.Record.ID, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "merchant notification failed"})
-		return
+	merchantNotificationSent := false
+	if store.MerchantPhone != "" {
+		if err := s.sendWAHAMessage(c.Request.Context(), store.MerchantPhone, merchantMessage); err != nil {
+			log.Printf("falló la notificación al comercio para el pedido %s: %v", payload.Record.ID, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": "merchant notification failed"})
+			return
+		}
+		merchantNotificationSent = true
 	}
 	if err := s.sendWAHAMessage(c.Request.Context(), customerPhone, customerMessage); err != nil {
 		log.Printf("falló la notificación al cliente para el pedido %s: %v", payload.Record.ID, err)
@@ -247,7 +261,7 @@ func (s server) handleOrderWebhook(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":                "sent",
-		"merchant_notification": true,
+		"merchant_notification": merchantNotificationSent,
 		"customer_notification": true,
 	})
 }
@@ -311,7 +325,9 @@ func (s server) resolveStore(ctx context.Context, storeID string) (storeRecord, 
 	}
 	query := endpoint.Query()
 	query.Set("id", "eq."+storeID)
-	query.Set("select", "id,name,pago_movil_phone")
+	// Request the complete row so deployments with different contact column
+	// names do not fail when an optional column is absent from the schema.
+	query.Set("select", "*")
 	query.Set("limit", "1")
 	endpoint.RawQuery = query.Encode()
 
@@ -334,7 +350,7 @@ func (s server) resolveStore(ctx context.Context, storeID string) (storeRecord, 
 		return storeRecord{}, fmt.Errorf("Supabase returned HTTP %d: %s", response.StatusCode, readResponseSnippet(response.Body))
 	}
 
-	var stores []storeRecord
+	var stores []map[string]json.RawMessage
 	decoder := json.NewDecoder(io.LimitReader(response.Body, maxAPIResponse))
 	if err := decoder.Decode(&stores); err != nil {
 		return storeRecord{}, fmt.Errorf("decode Supabase response: %w", err)
@@ -342,13 +358,98 @@ func (s server) resolveStore(ctx context.Context, storeID string) (storeRecord, 
 	if len(stores) == 0 {
 		return storeRecord{}, errStoreNotFound
 	}
-	store := stores[0]
-	if normalizePhoneWithCountry(store.PagoMovilPhone, s.defaultCountryCode) == "" {
-		return storeRecord{}, errStorePhoneEmpty
+	fields := stores[0]
+	store := storeRecord{
+		ID:               jsonStringField(fields, "id"),
+		Name:             jsonStringField(fields, "name"),
+		WhatsAppPhone:    jsonStringField(fields, "whatsapp_phone"),
+		Phone:            jsonStringField(fields, "phone"),
+		PagoMovilPhone:   jsonStringField(fields, "pago_movil_phone"),
+		NotificationLang: "es",
+		Currency:         "USD",
 	}
-	store.NotificationLang = "es"
-	store.Currency = "USD"
+	store.MerchantPhone, store.MerchantPhoneSource = selectStorePhone(fields, s.defaultCountryCode)
+	if store.MerchantPhone == "" {
+		store.MerchantPhone = normalizePhoneWithCountry(s.defaultMerchantPhone, s.defaultCountryCode)
+		if store.MerchantPhone != "" {
+			store.MerchantPhoneSource = "DEFAULT_MERCHANT_PHONE"
+			log.Printf("aviso: la tienda %s no tiene un teléfono de contacto válido; se usará DEFAULT_MERCHANT_PHONE", store.ID)
+		} else {
+			log.Printf("aviso: la tienda %s no tiene un teléfono de contacto válido y DEFAULT_MERCHANT_PHONE no está configurado; se omitirá la notificación al comercio", store.ID)
+		}
+	}
 	return store, nil
+}
+
+var preferredStorePhoneColumns = []string{"whatsapp_phone", "phone", "pago_movil_phone"}
+
+func selectStorePhone(fields map[string]json.RawMessage, defaultCountryCode string) (string, string) {
+	for _, column := range preferredStorePhoneColumns {
+		if phone := normalizePhoneWithCountry(jsonStringField(fields, column), defaultCountryCode); phone != "" {
+			return phone, column
+		}
+	}
+
+	type candidate struct {
+		column   string
+		priority int
+	}
+	candidates := make([]candidate, 0)
+	for column := range fields {
+		if priority, ok := additionalStorePhoneColumnPriority(column); ok {
+			candidates = append(candidates, candidate{column: column, priority: priority})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].priority == candidates[j].priority {
+			return candidates[i].column < candidates[j].column
+		}
+		return candidates[i].priority < candidates[j].priority
+	})
+	for _, candidate := range candidates {
+		if phone := normalizePhoneWithCountry(jsonStringField(fields, candidate.column), defaultCountryCode); phone != "" {
+			return phone, candidate.column
+		}
+	}
+	return "", ""
+}
+
+func additionalStorePhoneColumnPriority(column string) (int, bool) {
+	column = strings.ToLower(strings.TrimSpace(column))
+	for _, preferred := range preferredStorePhoneColumns {
+		if column == preferred {
+			return 0, false
+		}
+	}
+	switch {
+	case strings.Contains(column, "whatsapp"):
+		return 10, true
+	case strings.Contains(column, "phone"), strings.Contains(column, "telephone"), strings.Contains(column, "telefono"), strings.Contains(column, "teléfono"):
+		return 20, true
+	case column == "mobile", column == "movil", column == "móvil", column == "celular",
+		strings.Contains(column, "mobile_number"), strings.Contains(column, "numero_movil"), strings.Contains(column, "número_móvil"):
+		return 30, true
+	case column == "contact", column == "store_contact", strings.Contains(column, "contact_number"), strings.Contains(column, "numero_contacto"):
+		return 40, true
+	default:
+		return 0, false
+	}
+}
+
+func jsonStringField(fields map[string]json.RawMessage, column string) string {
+	raw, ok := fields[column]
+	if !ok {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil {
+		return strings.TrimSpace(value)
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return strings.TrimSpace(number.String())
+	}
+	return ""
 }
 
 func (s server) sendWAHAMessage(ctx context.Context, phone, message string) error {

@@ -5,7 +5,10 @@ import {
   ocrAnalysisSchema,
   type OcrAnalysis,
 } from "@/lib/checkout-validation";
-import { getExchangeRates } from "@/lib/exchange-rate";
+import {
+  getExchangeRates,
+  resolveStoreExchangeRate,
+} from "@/lib/exchange-rate";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -177,6 +180,8 @@ export async function POST(request: Request) {
     customerPhone: form.get("customer_phone"),
     paymentMethod: form.get("payment_method"),
     totalUsd: form.get("total_usd"),
+    exchangeRate: form.get("exchange_rate"),
+    totalVes: form.get("total_ves"),
     items,
   });
   if (
@@ -199,11 +204,20 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
-  const { data: store } = await admin
+  const { data: store, error: storeError } = await admin
     .from("stores")
-    .select("id")
+    .select(
+      "id, exchange_rate_mode, manual_exchange_rate, current_exchange_rate, exchange_rate_updated_at",
+    )
     .eq("slug", parsed.data.storeSlug)
     .maybeSingle();
+  if (storeError) {
+    console.error("Checkout store lookup failed", { code: storeError.code });
+    return NextResponse.json(
+      { error: "No se pudo consultar la tienda." },
+      { status: 500 },
+    );
+  }
   if (!store) {
     return NextResponse.json(
       { error: "Tienda no encontrada." },
@@ -212,16 +226,43 @@ export async function POST(request: Request) {
   }
 
   const productIds = parsed.data.items.map((item) => item.id);
-  const { data: products } = await admin
+  const { data: products, error: productsError } = await admin
     .from("products")
-    .select("id, price_usd")
+    .select("id, price_usd, stock")
     .eq("store_id", store.id)
     .eq("is_active", true)
     .in("id", productIds);
+  if (productsError) {
+    console.error("Checkout product lookup failed", {
+      code: productsError.code,
+    });
+    return NextResponse.json(
+      { error: "No se pudo validar el inventario." },
+      { status: 500 },
+    );
+  }
   if (!products || products.length !== productIds.length) {
     return NextResponse.json(
       { error: "El carrito contiene productos inválidos." },
       { status: 400 },
+    );
+  }
+
+  const stockById = new Map(
+    products.map((product) => [product.id, Number(product.stock)]),
+  );
+  const itemWithoutStock = parsed.data.items.find((item) => {
+    const stock = stockById.get(item.id);
+    return stock === undefined || !Number.isInteger(stock) || stock < item.quantity;
+  });
+  if (itemWithoutStock) {
+    return NextResponse.json(
+      {
+        error:
+          "Uno de los productos no tiene stock suficiente. Actualiza el carrito e intenta nuevamente.",
+        code: "INSUFFICIENT_STOCK",
+      },
+      { status: 409 },
     );
   }
 
@@ -240,28 +281,68 @@ export async function POST(request: Request) {
     );
   }
 
-  let bcvExchangeRate: number | null = null;
+  let exchangeRateUsed: number | null = null;
+  let totalVes: number | null = null;
+  let exchangeRateSource: "bcv" | "manual" | "stored_bcv" | null = null;
   if (parsed.data.paymentMethod === "pago_movil") {
-    const rates = await getExchangeRates();
-    bcvExchangeRate = rates.official.value;
+    const rates =
+      store.exchange_rate_mode === "manual"
+        ? null
+        : await getExchangeRates();
+    const storeRate = resolveStoreExchangeRate(store, rates);
+    exchangeRateUsed = storeRate.value;
     if (
-      bcvExchangeRate === null ||
-      !Number.isFinite(bcvExchangeRate) ||
-      bcvExchangeRate <= 0
+      exchangeRateUsed === null ||
+      !Number.isFinite(exchangeRateUsed) ||
+      exchangeRateUsed <= 0
     ) {
       return NextResponse.json(
         {
           error:
-            "La tasa BCV no está disponible en este momento. Intenta nuevamente más tarde.",
+            "La tasa de cambio de la tienda no está disponible. Intenta nuevamente más tarde.",
         },
         { status: 503 },
       );
     }
+
+    totalVes = roundMoney(calculatedTotalUsd * exchangeRateUsed);
+    if (
+      parsed.data.exchangeRate === null ||
+      parsed.data.totalVes === null ||
+      Math.abs(parsed.data.exchangeRate - exchangeRateUsed) > 0.000001 ||
+      Math.abs(parsed.data.totalVes - totalVes) > 0.009
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "La tasa o el monto en bolívares cambió. Actualiza la página antes de realizar el pago.",
+          code: "EXCHANGE_RATE_CHANGED",
+        },
+        { status: 409 },
+      );
+    }
+
+    exchangeRateSource =
+      storeRate.source === "unavailable" ? null : storeRate.source;
+    if (storeRate.source === "bcv") {
+      const { error: rateUpdateError } = await admin
+        .from("stores")
+        .update({
+          current_exchange_rate: exchangeRateUsed,
+          exchange_rate_updated_at: new Date().toISOString(),
+        })
+        .eq("id", store.id);
+      if (rateUpdateError) {
+        console.warn("Could not persist the latest official store rate", {
+          code: rateUpdateError.code,
+        });
+      }
+    }
   }
 
   const expectedAmount =
-    parsed.data.paymentMethod === "pago_movil" && bcvExchangeRate !== null
-      ? roundMoney(calculatedTotalUsd * bcvExchangeRate)
+    parsed.data.paymentMethod === "pago_movil" && totalVes !== null
+      ? totalVes
       : calculatedTotalUsd;
   const expectedPlatform = expectedPlatforms[parsed.data.paymentMethod];
   const expectedCurrency = expectedCurrencies[parsed.data.paymentMethod];
@@ -336,7 +417,9 @@ export async function POST(request: Request) {
     ...analysis,
     expected_amount: expectedAmount,
     expected_currency: expectedCurrency,
-    bcv_exchange_rate: bcvExchangeRate,
+    exchange_rate_used: exchangeRateUsed,
+    exchange_rate_source: exchangeRateSource,
+    total_ves: totalVes,
     items: parsed.data.items,
     // Compatibilidad con la vista actual de pedidos.
     monto: analysis.amount,
@@ -344,20 +427,24 @@ export async function POST(request: Request) {
     numero_referencia: analysis.reference,
     es_legible: true,
   };
-  const { data: order, error: orderError } = await admin
-    .from("orders")
-    .insert({
-      store_id: store.id,
-      customer_name: parsed.data.customerName || null,
-      customer_phone: parsed.data.customerPhone,
-      total_usd: calculatedTotalUsd,
-      payment_method: parsed.data.paymentMethod,
-      payment_reference: analysis.reference,
-      ocr_data: ocrData,
-      status: "pending",
-    })
-    .select("id")
-    .single();
+  const { data: orderId, error: orderError } = await admin.rpc(
+    "create_order_with_items",
+    {
+      p_store_id: store.id,
+      p_customer_name: parsed.data.customerName || null,
+      p_customer_phone: parsed.data.customerPhone,
+      p_payment_method: parsed.data.paymentMethod,
+      p_payment_reference: analysis.reference,
+      p_ocr_data: ocrData,
+      p_expected_total_usd: calculatedTotalUsd,
+      p_exchange_rate_used: exchangeRateUsed,
+      p_total_ves: totalVes,
+      p_items: parsed.data.items.map((item) => ({
+        product_id: item.id,
+        quantity: item.quantity,
+      })),
+    },
+  );
   if (orderError?.code === "23505") {
     return NextResponse.json(
       {
@@ -368,14 +455,59 @@ export async function POST(request: Request) {
       { status: 409 },
     );
   }
-  if (orderError || !order) {
+  if (orderError?.message.includes("INSUFFICIENT_STOCK")) {
+    return NextResponse.json(
+      {
+        error:
+          "Uno de los productos se agotó mientras procesábamos el pedido. Actualiza el carrito e intenta nuevamente.",
+        code: "INSUFFICIENT_STOCK",
+      },
+      { status: 409 },
+    );
+  }
+  if (orderError?.message.includes("PRODUCT_UNAVAILABLE")) {
+    return NextResponse.json(
+      {
+        error:
+          "Uno de los productos ya no está disponible. Actualiza el carrito e intenta nuevamente.",
+        code: "PRODUCT_UNAVAILABLE",
+      },
+      { status: 409 },
+    );
+  }
+  if (orderError?.message.includes("PRICE_CHANGED")) {
+    return NextResponse.json(
+      {
+        error: "El precio del carrito cambió. Actualiza e intenta nuevamente.",
+        code: "PRICE_CHANGED",
+      },
+      { status: 409 },
+    );
+  }
+  if (
+    orderError?.message.includes("INVALID_EXCHANGE_SNAPSHOT") ||
+    orderError?.message.includes("EXCHANGE_TOTAL_CHANGED")
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "La cotización de Pago Móvil cambió. Actualiza la página e intenta nuevamente.",
+        code: "EXCHANGE_RATE_CHANGED",
+      },
+      { status: 409 },
+    );
+  }
+  if (orderError || typeof orderId !== "string") {
+    console.error("Atomic checkout failed", {
+      code: orderError?.code,
+    });
     return NextResponse.json(
       { error: "No se pudo crear el pedido." },
       { status: 500 },
     );
   }
 
-  const proofPath = `${store.id}/${order.id}.${
+  const proofPath = `${store.id}/${orderId}.${
     fileValue.type === "image/png" ? "png" : "jpg"
   }`;
   const upload = await admin.storage
@@ -388,21 +520,21 @@ export async function POST(request: Request) {
     await admin
       .from("orders")
       .update({ status: "manual_review" })
-      .eq("id", order.id);
-    return NextResponse.json({ orderId: order.id, status: "manual_review" });
+      .eq("id", orderId);
+    return NextResponse.json({ orderId, status: "manual_review" });
   }
 
   const save = await admin
     .from("orders")
     .update({ payment_proof_path: proofPath, status: "verified" })
-    .eq("id", order.id);
+    .eq("id", orderId);
   if (save.error) {
     await admin
       .from("orders")
       .update({ status: "manual_review" })
-      .eq("id", order.id);
-    return NextResponse.json({ orderId: order.id, status: "manual_review" });
+      .eq("id", orderId);
+    return NextResponse.json({ orderId, status: "manual_review" });
   }
 
-  return NextResponse.json({ orderId: order.id, status: "verified" });
+  return NextResponse.json({ orderId, status: "verified" });
 }

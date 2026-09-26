@@ -93,6 +93,9 @@ func TestResolveStoreUsesServiceRoleKey(t *testing.T) {
 		if got := request.URL.Query().Get("id"); got != "eq."+testStoreID {
 			t.Fatalf("unexpected store filter: %s", got)
 		}
+		if got := request.URL.Query().Get("select"); got != "*" {
+			t.Fatalf("unexpected store select: %s", got)
+		}
 		if got := request.Header.Get("apikey"); got != testAPIKey {
 			t.Fatalf("unexpected apikey header: %s", got)
 		}
@@ -100,7 +103,7 @@ func TestResolveStoreUsesServiceRoleKey(t *testing.T) {
 			t.Fatalf("unexpected authorization header: %s", got)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`[{"id":"` + testStoreID + `","name":"Mi Tienda","pago_movil_phone":"+58 412-1111111"}]`))
+		_, _ = writer.Write([]byte(`[{"id":"` + testStoreID + `","name":"Mi Tienda","whatsapp_phone":"+58 412-3333333","phone":"+58 412-2222222","pago_movil_phone":"+58 412-1111111"}]`))
 	}))
 	defer upstream.Close()
 
@@ -109,8 +112,89 @@ func TestResolveStoreUsesServiceRoleKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveStore failed: %v", err)
 	}
-	if store.Name != "Mi Tienda" || normalizePhone(store.PagoMovilPhone) != "584121111111" {
+	if store.Name != "Mi Tienda" || store.MerchantPhone != "584123333333" || store.MerchantPhoneSource != "whatsapp_phone" {
 		t.Fatalf("unexpected store: %#v", store)
+	}
+}
+
+func TestSelectStorePhonePriority(t *testing.T) {
+	tests := []struct {
+		name       string
+		payload    string
+		wantPhone  string
+		wantSource string
+	}{
+		{
+			name:       "whatsapp before all other columns",
+			payload:    `{"whatsapp_phone":"0412-3333333","phone":"0412-2222222","pago_movil_phone":"0412-1111111"}`,
+			wantPhone:  "584123333333",
+			wantSource: "whatsapp_phone",
+		},
+		{
+			name:       "phone when whatsapp is invalid",
+			payload:    `{"whatsapp_phone":"invalid","phone":"0412-2222222","pago_movil_phone":"0412-1111111"}`,
+			wantPhone:  "584122222222",
+			wantSource: "phone",
+		},
+		{
+			name:       "pago movil as third choice",
+			payload:    `{"pago_movil_phone":"0412-1111111"}`,
+			wantPhone:  "584121111111",
+			wantSource: "pago_movil_phone",
+		},
+		{
+			name:       "additional contact phone column",
+			payload:    `{"support_phone":"0412-4444444"}`,
+			wantPhone:  "584124444444",
+			wantSource: "support_phone",
+		},
+		{
+			name:       "numeric contact number",
+			payload:    `{"contact_number":584125555555}`,
+			wantPhone:  "584125555555",
+			wantSource: "contact_number",
+		},
+		{
+			name:      "unrelated numeric fields are ignored",
+			payload:   `{"pago_movil_id":"123456789"}`,
+			wantPhone: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(test.payload), &fields); err != nil {
+				t.Fatalf("decode test payload: %v", err)
+			}
+			phone, source := selectStorePhone(fields, "58")
+			if phone != test.wantPhone || source != test.wantSource {
+				t.Fatalf("selectStorePhone() = (%q, %q), want (%q, %q)", phone, source, test.wantPhone, test.wantSource)
+			}
+		})
+	}
+}
+
+func TestResolveStoreUsesDefaultMerchantPhone(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`[{"id":"` + testStoreID + `","name":"Mi Tienda"}]`))
+	}))
+	defer upstream.Close()
+
+	s := server{
+		supabaseURL:          upstream.URL,
+		supabaseServiceKey:   testAPIKey,
+		defaultCountryCode:   "58",
+		defaultMerchantPhone: "0412-9999999",
+		httpClient:           &http.Client{Timeout: time.Second},
+	}
+	store, err := s.resolveStore(context.Background(), testStoreID)
+	if err != nil {
+		t.Fatalf("resolveStore failed: %v", err)
+	}
+	if store.MerchantPhone != "584129999999" || store.MerchantPhoneSource != "DEFAULT_MERCHANT_PHONE" {
+		t.Fatalf("unexpected fallback store: %#v", store)
 	}
 }
 
@@ -194,6 +278,47 @@ func TestWebhookEnrichesOrderAndNotifiesMerchantAndCustomer(t *testing.T) {
 		if message.Session != testSession {
 			t.Fatalf("unexpected WAHA session: %s", message.Session)
 		}
+	}
+}
+
+func TestWebhookContinuesWithoutMerchantPhone(t *testing.T) {
+	var mutex sync.Mutex
+	var messages []wahaMessage
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/v1/stores":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`[{"id":"` + testStoreID + `","name":"Mi Tienda"}]`))
+		case "/api/sendText":
+			var message wahaMessage
+			if err := json.NewDecoder(request.Body).Decode(&message); err != nil {
+				t.Fatalf("decode WAHA message: %v", err)
+			}
+			mutex.Lock()
+			messages = append(messages, message)
+			mutex.Unlock()
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"id":"message-id"}`))
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	body, _ := json.Marshal(validPayload())
+	request := httptest.NewRequest(http.MethodPost, "/webhooks/supabase/orders", bytes.NewReader(body))
+	request.Header.Set("X-Supabase-Webhook-Secret", testSecret)
+	response := httptest.NewRecorder()
+	testServer(upstream.URL).routes().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if len(messages) != 1 || messages[0].ChatID != customerChat {
+		t.Fatalf("unexpected messages: %#v", messages)
+	}
+	if !strings.Contains(response.Body.String(), `"merchant_notification":false`) || !strings.Contains(response.Body.String(), `"customer_notification":true`) {
+		t.Fatalf("unexpected response body: %s", response.Body.String())
 	}
 }
 

@@ -2,10 +2,20 @@
 
 import { useRef, useState } from "react";
 import { useCart } from "@/lib/cart";
+import type { StoreExchangeRate } from "@/lib/exchange-rate";
 
 type PaymentMethod = "zelle" | "pago_movil" | "binance_pay";
 type CheckoutStatus = "verified" | "manual_review" | "fraud_alert_duplicate";
 type MessageTone = "info" | "error";
+
+const vesFormatter = new Intl.NumberFormat("es-VE", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const rateFormatter = new Intl.NumberFormat("es-VE", {
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 6,
+});
 
 type PaymentDetails = {
   zelle_email: string | null;
@@ -44,7 +54,7 @@ export function CheckoutModal({
 }: {
   storeSlug: string;
   paymentDetails: PaymentDetails;
-  exchangeRate: number | null;
+  exchangeRate: StoreExchangeRate;
 }) {
   const { items, clear } = useCart();
   const [open, setOpen] = useState(false);
@@ -57,26 +67,41 @@ export function CheckoutModal({
   const submittingRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const availableMethods: PaymentMethod[] = [];
+  if (paymentDetails.zelle_email?.trim()) availableMethods.push("zelle");
+  if (
+    paymentDetails.pago_movil_bank?.trim() &&
+    paymentDetails.pago_movil_phone?.trim() &&
+    paymentDetails.pago_movil_id?.trim()
+  ) {
+    availableMethods.push("pago_movil");
+  }
+  if (paymentDetails.binance_pay_id?.trim()) {
+    availableMethods.push("binance_pay");
+  }
+  const selectedMethod = availableMethods.includes(method)
+    ? method
+    : availableMethods[0] ?? null;
+
   const totalUsd = items.reduce(
     (sum, item) => sum + item.price_usd * item.quantity,
     0,
   );
   const hasExchangeRate =
-    exchangeRate !== null && Number.isFinite(exchangeRate) && exchangeRate > 0;
+    exchangeRate.value !== null &&
+    Number.isFinite(exchangeRate.value) &&
+    exchangeRate.value > 0;
   const totalVes = hasExchangeRate
-    ? Math.round(totalUsd * exchangeRate * 100) / 100
+    ? Math.round(totalUsd * exchangeRate.value! * 100) / 100
     : null;
+  const exchangeRateLabel =
+    exchangeRate.source === "manual"
+      ? "Tasa configurada por la tienda"
+      : exchangeRate.source === "stored_bcv"
+        ? "Última tasa BCV sincronizada"
+        : "Tasa oficial BCV";
 
   if (!items.length && !open) return null;
-
-  const instructions =
-    method === "zelle"
-      ? `Zelle: ${paymentDetails.zelle_email ?? "datos no configurados"}`
-      : method === "pago_movil"
-        ? `Pago Móvil: ${paymentDetails.pago_movil_bank ?? "Banco no configurado"} · ${
-            paymentDetails.pago_movil_phone ?? "teléfono no configurado"
-          } · ${paymentDetails.pago_movil_id ?? "ID no configurado"}`
-        : `Binance Pay (USDT): ${paymentDetails.binance_pay_id ?? "ID no configurado"}`;
 
   function clearMessage() {
     setMessage("");
@@ -101,9 +126,13 @@ export function CheckoutModal({
       showError("Indica tu número de WhatsApp para recibir la confirmación.");
       return;
     }
-    if (method === "pago_movil" && totalVes === null) {
+    if (!selectedMethod) {
+      showError("Esta tienda aún no tiene métodos de pago configurados.");
+      return;
+    }
+    if (selectedMethod === "pago_movil" && totalVes === null) {
       showError(
-        "La tasa BCV no está disponible en este momento. Intenta nuevamente más tarde.",
+        "La tasa de cambio de esta tienda no está disponible. Intenta nuevamente más tarde.",
       );
       return;
     }
@@ -125,8 +154,16 @@ export function CheckoutModal({
     body.append("store_slug", storeSlug);
     body.append("customer_name", customerName);
     body.append("customer_phone", customerPhone);
-    body.append("payment_method", method);
+    body.append("payment_method", selectedMethod);
     body.append("total_usd", String(totalUsd));
+    if (
+      selectedMethod === "pago_movil" &&
+      exchangeRate.value !== null &&
+      totalVes !== null
+    ) {
+      body.append("exchange_rate", String(exchangeRate.value));
+      body.append("total_ves", String(totalVes));
+    }
     body.append(
       "items",
       JSON.stringify(
@@ -173,9 +210,12 @@ export function CheckoutModal({
             clearMessage();
             setOpen(true);
           }}
+          disabled={!availableMethods.length}
           className="mt-4 w-full rounded-lg bg-emerald-600 px-4 py-3 font-semibold text-white"
         >
-          Continuar al pago
+          {availableMethods.length
+            ? "Continuar al pago"
+            : "Métodos de pago no disponibles"}
         </button>
       ) : (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-6">
@@ -204,61 +244,100 @@ export function CheckoutModal({
                 placeholder="WhatsApp, ej. 584121234567"
                 className="h-11 rounded-lg border px-3"
               />
-              <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
-                <button
-                  type="button"
-                  onClick={() => selectMethod("zelle")}
-                  className={`rounded-md px-2 py-2 text-xs font-semibold ${
-                    method === "zelle" ? "bg-white shadow" : "text-slate-500"
-                  }`}
-                >
-                  Zelle (USD)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectMethod("pago_movil")}
-                  className={`rounded-md px-2 py-2 text-xs font-semibold ${
-                    method === "pago_movil"
-                      ? "bg-white shadow"
-                      : "text-slate-500"
-                  }`}
-                >
-                  Pago Móvil (VES)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectMethod("binance_pay")}
-                  className={`rounded-md px-2 py-2 text-xs font-semibold ${
-                    method === "binance_pay"
-                      ? "bg-white shadow"
-                      : "text-slate-500"
-                  }`}
-                >
-                  Binance (USDT)
-                </button>
+              <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+                {availableMethods.includes("zelle") ? (
+                  <button
+                    type="button"
+                    onClick={() => selectMethod("zelle")}
+                    className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold ${
+                      selectedMethod === "zelle"
+                        ? "bg-white shadow"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    Zelle (USD)
+                  </button>
+                ) : null}
+                {availableMethods.includes("pago_movil") ? (
+                  <button
+                    type="button"
+                    onClick={() => selectMethod("pago_movil")}
+                    className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold ${
+                      selectedMethod === "pago_movil"
+                        ? "bg-white shadow"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    Pago Móvil (VES)
+                  </button>
+                ) : null}
+                {availableMethods.includes("binance_pay") ? (
+                  <button
+                    type="button"
+                    onClick={() => selectMethod("binance_pay")}
+                    className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold ${
+                      selectedMethod === "binance_pay"
+                        ? "bg-white shadow"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    Binance (USDT)
+                  </button>
+                ) : null}
               </div>
 
-              {method === "pago_movil" ? (
-                totalVes !== null && exchangeRate !== null ? (
-                  <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-950">
-                    <p className="font-semibold">
-                      Monto a pagar: Bs. {totalVes.toFixed(2)}
+              {selectedMethod === "pago_movil" ? (
+                totalVes !== null && exchangeRate.value !== null ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                      Monto exacto para Pago Móvil
                     </p>
-                    <p className="mt-1 text-xs text-emerald-800">
-                      Tasa BCV: Bs. {exchangeRate.toFixed(4)} por USD
+                    <p className="mt-1 text-2xl font-bold">
+                      Bs. {vesFormatter.format(totalVes)}
+                    </p>
+                    <p className="mt-2 text-xs text-emerald-800">
+                      ${totalUsd.toFixed(2)} USD × Bs. {rateFormatter.format(exchangeRate.value)} = Bs. {vesFormatter.format(totalVes)}
+                    </p>
+                    <p className="mt-1 text-xs text-emerald-700">
+                      {exchangeRateLabel}
+                      {exchangeRate.updatedAt
+                        ? ` · ${new Date(exchangeRate.updatedAt).toLocaleString("es-VE", { dateStyle: "short", timeStyle: "short" })}`
+                        : ""}
                     </p>
                   </div>
                 ) : (
                   <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-                    La tasa BCV no está disponible. No confirmes el pago hasta
-                    que podamos mostrar el monto exacto en bolívares.
+                    La tasa de cambio de la tienda no está disponible. No
+                    confirmes el pago hasta que podamos mostrar el monto exacto
+                    en bolívares.
                   </p>
                 )
               ) : null}
 
-              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-                {instructions}
-              </p>
+              <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                {selectedMethod === "zelle" ? (
+                  <p>
+                    <span className="font-semibold">
+                      Zelle (correo o teléfono):
+                    </span>{" "}
+                    {paymentDetails.zelle_email}
+                  </p>
+                ) : selectedMethod === "pago_movil" ? (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                    <dt className="font-semibold">Banco:</dt>
+                    <dd>{paymentDetails.pago_movil_bank}</dd>
+                    <dt className="font-semibold">Teléfono:</dt>
+                    <dd>{paymentDetails.pago_movil_phone}</dd>
+                    <dt className="font-semibold">Cédula / RIF:</dt>
+                    <dd>{paymentDetails.pago_movil_id}</dd>
+                  </dl>
+                ) : (
+                  <p>
+                    <span className="font-semibold">Binance Pay ID:</span>{" "}
+                    {paymentDetails.binance_pay_id}
+                  </p>
+                )}
+              </div>
               <label className="text-sm font-medium">
                 Comprobante (JPG o PNG, máximo 5 MB)
                 <input
@@ -293,7 +372,9 @@ export function CheckoutModal({
                   type="button"
                   onClick={submit}
                   disabled={
-                    isSubmitting || (method === "pago_movil" && totalVes === null)
+                    isSubmitting ||
+                    !selectedMethod ||
+                    (selectedMethod === "pago_movil" && totalVes === null)
                   }
                   aria-busy={isSubmitting}
                   className="flex-1 rounded-lg bg-emerald-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-emerald-300"
