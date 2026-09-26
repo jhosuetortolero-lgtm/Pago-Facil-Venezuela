@@ -1,51 +1,79 @@
 # PagoFácil Messenger
 
-Microsserviço Go responsável por receber eventos de pedidos do Supabase e enviar notificações privadas ao lojista pelo WAHA.
+Microservicio Go que recibe eventos de `public.orders` desde Supabase, enriquece cada pedido con los datos de `public.stores` y envía notificaciones al comerciante y al cliente mediante WAHA.
 
-## Segurança
+## Flujo
 
-- A rota `POST /webhooks/supabase/orders` exige `X-Supabase-Webhook-Secret` igual a `SUPABASE_WEBHOOK_SECRET`.
-- A comparação do segredo é feita em tempo constante.
-- O payload é limitado a 1 MB e campos desconhecidos são rejeitados.
-- As credenciais WAHA só vêm de variáveis de ambiente e nunca são retornadas ao cliente.
+1. Valida el header `X-Supabase-Webhook-Secret` antes de leer o procesar el payload.
+2. Acepta eventos `INSERT` y `UPDATE` de `public.orders`.
+3. Consulta `public.stores` por `record.store_id` usando la API REST de Supabase y una clave exclusiva del backend.
+4. Usa `stores.pago_movil_phone` como número WhatsApp del comerciante y `orders.customer_phone` como número del cliente.
+5. Envía ambos mensajes por `POST /api/sendText` de WAHA.
+6. En eventos `UPDATE`, solo notifica cuando cambia el estado del pedido para evitar duplicados innecesarios.
 
-## Configuração e execução
+## Variables de entorno
 
-```bash
-cp .env.example .env
+Copie `.env.example` a `.env` y complete los secretos:
+
+```env
+PORT=8080
+GIN_MODE=release
+DEFAULT_COUNTRY_CODE=58
+SUPABASE_WEBHOOK_SECRET=un-secreto-aleatorio-de-al-menos-32-caracteres
+SUPABASE_URL=https://project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=service-role-key-del-backend
+WAHA_URL=http://localhost:3001
+WAHA_API_KEY=api-key-de-waha
+WAHA_SESSION=nombre-de-la-sesion-conectada
+```
+
+También se admite `SUPABASE_SECRET_KEY` y, si está definida, tiene prioridad sobre la clave legacy `SUPABASE_SERVICE_ROLE_KEY`. Ninguna de estas claves debe exponerse en el navegador ni versionarse.
+
+Los teléfonos pueden estar en formato internacional, por ejemplo `584121234567`. Cuando comienzan con el prefijo local `0`, el servicio reemplaza ese cero por `DEFAULT_COUNTRY_CODE` (`58` por defecto). El esquema actual no tiene un campo WhatsApp dedicado en `stores`, por lo que se usa `pago_movil_phone`. Si se agrega un campo como `whatsapp_phone` en el futuro, debe actualizarse el `select` del resolver.
+
+## Ejecución
+
+```powershell
+cd webhook-service
 go mod download
 go run .
 ```
 
-Para produção, injete as variáveis pelo secret manager do ambiente. Compile com:
-
-```bash
-go build -o pagofacil-messenger .
-```
-
 Health check: `GET /health`.
 
-## Webhook
+Para producción, inyecte las variables mediante el secret manager del entorno y compile con:
 
-Configure o webhook do Supabase apontando para `POST /webhooks/supabase/orders`, com o header secreto. O corpo esperado segue o formato de Database Webhook do Supabase:
+```powershell
+go build -o pagofacil-messenger.exe .
+```
+
+## Webhook de Supabase
+
+Configure un Database Webhook para `INSERT` y `UPDATE` de `public.orders` apuntando a:
+
+```text
+POST https://su-host-publico/webhooks/supabase/orders
+X-Supabase-Webhook-Secret: el-mismo-valor-de-SUPABASE_WEBHOOK_SECRET
+```
+
+Ejemplo de payload:
 
 ```json
 {
-  "type": "UPDATE",
+  "type": "INSERT",
   "table": "orders",
   "schema": "public",
   "record": {
-    "id": "uuid-do-pedido",
-    "store_id": "uuid-da-loja",
-    "store_name": "Mi Tienda",
-    "store_phone": "584121234567",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "store_id": "22222222-2222-4222-8222-222222222222",
     "customer_name": "Cliente",
+    "customer_phone": "584121234567",
     "total_usd": 25.5,
     "payment_method": "binance_pay",
-    "status": "verified"
+    "status": "pending"
   },
   "old_record": {}
 }
 ```
 
-`store_phone` ou `merchant_phone` deve ser incluído pelo emissor do webhook, pois o registro puro de `orders` não contém o telefone da loja. O formato do chat enviado ao WAHA é `<telefone>@c.us`, conforme a API `POST /api/sendText`. Os status aceitos são `verified`, `manual_review`, `fraud_alert` e `fraud_alert_duplicate`.
+El servicio ignora campos adicionales que Supabase incluya en el registro, pero valida estrictamente tipo, tabla, esquema, UUID, método de pago, estado, monto y teléfono del cliente. El cuerpo está limitado a 1 MB.

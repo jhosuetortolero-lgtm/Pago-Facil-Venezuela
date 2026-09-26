@@ -34,6 +34,7 @@ yarn-error.log*
 .env*
 !.env.example
 public/logo-pagofacil.jpg
+/webhook-service/ngrok-v3-stable-windows-amd64/
 
 # vercel
 .vercel

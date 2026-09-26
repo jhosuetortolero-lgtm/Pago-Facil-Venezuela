@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { createStore, refreshAutomaticRate, updateStore } from "../actions";
+import { createStore, refreshAutomaticRate, updateStoreConfig } from "../actions";
 import { ExchangeRateToggle } from "@/components/exchange-rate-toggle";
 import { Activity, AlertTriangle, Boxes, Clock3, DollarSign, MessageCircle } from "lucide-react";
 import { MerchantSubmitButton } from "@/components/merchant-submit-button";
@@ -199,7 +199,7 @@ export default async function DashboardPage({
           ) : null}
           <details id="configuracion" className="pf-card-3d mt-8 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 shadow-lg shadow-slate-200/30" open={!isActive || params.section === "settings"}>
             <summary className="cursor-pointer list-none border-b border-slate-200/80 px-6 py-5 text-lg font-bold text-slate-900 transition hover:bg-emerald-50/50"><span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-100 text-emerald-700">⚙</span><span><span className="block">Configuración de pagos</span><span className="mt-0.5 block text-xs font-normal text-slate-500">Administra tus datos de cobro y la tasa de cambio.</span></span></span></summary>
-          <form action={updateStore} className="grid max-w-5xl gap-4 p-6 md:grid-cols-2">
+          <form action={updateStoreConfig} className="grid max-w-5xl gap-4 p-6 md:grid-cols-2">
             <label className="text-sm font-medium">
               Nombre de la tienda
               <input
@@ -258,7 +258,7 @@ export default async function DashboardPage({
               />
             </label>
             <label className="text-sm font-medium">
-              Binance Pay ID
+              ID de Binance Pay
               <input
                 name="binance_pay_id"
                 defaultValue={store.binance_pay_id ?? ""}

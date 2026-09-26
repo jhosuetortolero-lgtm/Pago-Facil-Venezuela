@@ -67,8 +67,12 @@ Para o microsserviço, configure `webhook-service/.env` conforme `webhook-servic
 
 ```env
 PORT=8080
+GIN_MODE=release
+DEFAULT_COUNTRY_CODE=58
 SUPABASE_WEBHOOK_SECRET=
-WAHA_URL=http://localhost:3000
+SUPABASE_URL=https://seu-projeto.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=
+WAHA_URL=http://localhost:3001
 WAHA_API_KEY=
 WAHA_SESSION=default
 ```

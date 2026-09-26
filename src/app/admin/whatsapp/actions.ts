@@ -104,14 +104,38 @@ async function getQrDataUrl(): Promise<string | null> {
   return null;
 }
 
+async function waitForQrDataUrl(attempts = 8, delayMs = 750): Promise<string | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const qrDataUrl = await getQrDataUrl();
+    if (qrDataUrl) return qrDataUrl;
+    if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return null;
+}
+
 export async function generateWahaQr(): Promise<WahaActionResult> {
   const merchant = await requireMerchant();
   if (!merchant.ok) return { ok: false, message: merchant.reason };
   const { session } = getConfig();
+  const current = await wahaRequest(`/api/sessions/${encodeURIComponent(session)}`);
+  if (current.ok) {
+    const currentSnapshot = snapshotFrom(current.data, "Sesión consultada correctamente.");
+    if (currentSnapshot.state === "connected") {
+      return {
+        ok: true,
+        message: "WhatsApp ya está conectado. No necesitas generar otro código QR.",
+        snapshot: currentSnapshot,
+        qrDataUrl: null,
+      };
+    }
+  }
   const start = await wahaRequest(`/api/sessions/${encodeURIComponent(session)}/start`, { method: "POST", body: "{}" });
   if (!start.ok && start.status !== 409 && start.status !== 422) return { ok: false, message: start.error ?? "No se pudo iniciar la sesión." };
-  const qrDataUrl = await getQrDataUrl();
+  const qrDataUrl = await waitForQrDataUrl();
   const snapshot = await getWahaSnapshot();
+  if (snapshot.state === "connected") {
+    return { ok: true, message: "WhatsApp ya está conectado.", snapshot, qrDataUrl: null };
+  }
   return qrDataUrl ? { ok: true, message: "Código QR generado. Escanéalo desde WhatsApp.", snapshot, qrDataUrl } : { ok: false, message: "WAHA no devolvió un código QR. Verifica que la sesión esté esperando autenticación.", snapshot };
 }
 

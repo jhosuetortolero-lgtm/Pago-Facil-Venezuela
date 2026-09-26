@@ -118,7 +118,7 @@ export async function createStore(formData: FormData) {
   revalidatePath("/admin/dashboard");
 }
 
-export async function updateStore(formData: FormData) {
+export async function updateStoreConfig(formData: FormData) {
   const { supabase, store } = await ownedStore();
   if (!store) redirect("/admin/dashboard?error=Crea%20tu%20tienda%20primero.");
   const parsed = storeSchema.safeParse(Object.fromEntries(formData));
@@ -129,6 +129,7 @@ export async function updateStore(formData: FormData) {
     .from("stores")
     .update({
       ...parsed.data,
+      binance_pay_id: parsed.data.binance_pay_id || null,
       slug,
       manual_exchange_rate:
         parsed.data.exchange_rate_mode === "manual"
